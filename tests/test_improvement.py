@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import quant_labeler.improvement as improvement
+from quant_labeler import improvement
 from quant_labeler.improvement import (
     feature_comparison,
     find_directional_filters,
@@ -120,6 +120,46 @@ alertcondition(shortEntry, title="做空進場")
     assert 'plotshape(showEntry and improvedShortSignal, title="做空")' in pine_text
     assert 'alertcondition(improvedLongSignal, title="做多進場")' in pine_text
     assert 'alertcondition(improvedShortSignal, title="做空進場")' in pine_text
+
+
+def test_generated_filter_does_not_split_multiline_signal_declarations(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(improvement, "INDICATORS_DIR", tmp_path)
+    (tmp_path / "multiline.pine").write_text(
+        """//@version=6
+indicator("Multiline", overlay=true)
+early = ta.crossover(close, ta.sma(close, 5))
+plotshape(early, title="Early marker")
+longSignal = barstate.isconfirmed and close > open and
+     low <= open and high > close
+shortSignal = barstate.isconfirmed and close < open and
+     high >= open and low < close
+plotshape(longSignal, title="Long entry")
+plotshape(shortSignal, title="Short entry")
+alertcondition(longSignal, title="Long signal")
+alertcondition(shortSignal, title="Short signal")
+""",
+        encoding="utf-8",
+    )
+
+    pine = improvement._write_pine(
+        "multiline",
+        "multiline_v2",
+        2,
+        [{"feature": "rsi_14", "op": "ge", "value": 50.0}],
+        [{"feature": "rsi_14", "op": "le", "value": 50.0}],
+    )
+    pine_text = pine.read_text(encoding="utf-8")
+
+    assert "low <= open and high > close\nshortSignal" in pine_text
+    assert pine_text.index("high >= open and low < close") < pine_text.index(
+        "// AI improvement V2"
+    )
+    assert pine_text.index("shortSignal =") < pine_text.index("improvedLongSignal =")
+    assert pine_text.index("improvedShortSignal =") < pine_text.index(
+        "plotshape(improvedLongSignal"
+    )
 
 
 def test_direction_gain_is_kept_even_when_trade_mix_lowers_combined_rate(monkeypatch):

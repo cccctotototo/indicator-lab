@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import combinations
 from pathlib import Path
 
@@ -26,7 +26,6 @@ from .storage import (
     register_signals,
 )
 
-
 SUPPORTED_FEATURES = {
     "rsi_14": "RSI 14",
     "volume_ratio_20": "量能／20 根均量",
@@ -41,7 +40,7 @@ def _stats(frame: pd.DataFrame) -> dict:
         return {"samples": 0, "wins": 0, "losses": 0, "win_rate": None}
     wins = int((frame["label_text"] == "win").sum())
     return {
-        "samples": int(len(frame)),
+        "samples": len(frame),
         "wins": wins,
         "losses": int(len(frame) - wins),
         "win_rate": float(wins / len(frame) * 100),
@@ -92,7 +91,7 @@ def analyze_indicator(dataset_id: int, indicator_name: str) -> dict:
 
     def actual_stats(part: pd.DataFrame) -> dict:
         wins = int((part["label"] == "win").sum())
-        samples = int(len(part))
+        samples = len(part)
         return {
             "samples": samples,
             "wins": wins,
@@ -121,17 +120,17 @@ def analyze_indicator(dataset_id: int, indicator_name: str) -> dict:
                         "feature": feature,
                         "name": name,
                         "median": float(values.median()),
-                        "samples": int(len(values)),
+                        "samples": len(values),
                     }
                 )
         if decisive["label"].nunique() == 2:
             comparison = feature_comparison(training)
     return {
         "indicator_name": indicator_name,
-        "total_signals": int(len(signals)),
+        "total_signals": len(signals),
         "remaining": int(signals["label"].isna().sum()),
         "invalid": int((signals["label"] == "invalid").sum()),
-        "decisive": int(len(decisive)),
+        "decisive": len(decisive),
         "overall": actual_stats(decisive),
         "directions": direction_stats,
         "feature_comparison": comparison.to_dict(orient="records"),
@@ -358,12 +357,22 @@ def _load_metadata(indicator_name: str) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
-def _next_version(root: str) -> int:
+def _next_version(root: str, dataset_id: int | None = None) -> int:
     versions = [1]
     for path in STRATEGY_VERSIONS_DIR.glob(f"{root}_v*.json"):
         match = re.search(r"_v(\d+)$", path.stem)
         if match:
             versions.append(int(match.group(1)))
+    for path in INDICATORS_DIR.glob(f"{root}_v*.pine"):
+        match = re.search(r"_v(\d+)$", path.stem)
+        if match:
+            versions.append(int(match.group(1)))
+    if dataset_id is not None:
+        signals = list_signals(dataset_id)
+        for name in signals.get("indicator_name", pd.Series(dtype=str)).unique():
+            match = re.fullmatch(rf"{re.escape(root)}_v(\d+)", str(name))
+            if match:
+                versions.append(int(match.group(1)))
     return max(versions) + 1
 
 
@@ -391,33 +400,70 @@ def _signal_output_insertion_point(
     """Insert filters after signal declarations, before their visual/alert outputs."""
     expressions = f"{long_expression}\n{short_expression}"
     expression_names = set(re.findall(r"\b[A-Za-z_]\w*\b", expressions))
-    declaration_ends: list[int] = []
+    declaration_starts: list[int] = []
     for name in expression_names:
         declaration = re.compile(
             rf"(?m)^[ \t]*(?:(?:var|varip)\s+)?"
             rf"(?:(?:bool|int|float|color|string)\s+)?"
             rf"{re.escape(name)}\s*=(?!=)"
         )
-        declaration_ends.extend(
-            source.find("\n", match.end()) + 1
-            for match in declaration.finditer(source)
+        declaration_starts.extend(match.start() for match in declaration.finditer(source))
+    after_declarations = max(declaration_starts, default=0)
+
+    def call_spans(call_name: str) -> list[tuple[int, int]]:
+        spans: list[tuple[int, int]] = []
+        pattern = re.compile(rf"\b{re.escape(call_name)}\s*\(")
+        for match in pattern.finditer(source, after_declarations):
+            open_at = source.find("(", match.start())
+            depth = 0
+            quote: str | None = None
+            escaped = False
+            for index in range(open_at, len(source)):
+                char = source[index]
+                if quote is not None:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == quote:
+                        quote = None
+                    continue
+                if char in {'"', "'"}:
+                    quote = char
+                elif char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                    if depth == 0:
+                        spans.append((match.start(), index + 1))
+                        break
+        return spans
+
+    output_spans = [
+        span
+        for call_name in (
+            "plotshape",
+            "plotchar",
+            "strategy.entry",
+            "alertcondition",
         )
-    after_declarations = max(declaration_ends, default=0)
-    output_positions = [
-        position
-        for marker in (
-            "plotshape(",
-            "plotchar(",
-            "strategy.entry(",
-            "alertcondition(",
-        )
-        if (position := source.find(marker, after_declarations)) >= 0
+        for span in call_spans(call_name)
     ]
+    signal_output_positions = [
+        start
+        for start, end in output_spans
+        if any(
+            re.search(rf"\b{re.escape(name)}\b", source[start:end])
+            for name in expression_names
+        )
+    ]
+    output_positions = signal_output_positions or [start for start, _ in output_spans]
     if not output_positions:
         raise ValueError(
             "Pine 找不到位於多空訊號宣告後的輸出，無法安全插入過濾器。"
         )
-    return min(output_positions)
+    position = min(output_positions)
+    return source.rfind("\n", 0, position) + 1
 
 
 def _write_pine(
@@ -522,7 +568,7 @@ def improve_indicator(
             if not item.get("superseded_by") and item.get("recommended", True)
         ]
         if active_children:
-            return sorted(active_children, key=lambda item: item["version"])[-1]
+            return max(active_children, key=lambda item: item["version"])
 
     signals = list_signals(dataset_id, indicator_name)
     if signals.empty:
@@ -543,7 +589,7 @@ def improve_indicator(
     selected = find_directional_filters(data)
     long_rules = [*cumulative_long_rules, *selected["long"]["rules"]]
     short_rules = [*cumulative_short_rules, *selected["short"]["rules"]]
-    version = _next_version(root)
+    version = _next_version(root, dataset_id)
     child = f"{root}_v{version}"
     dataset = get_dataset(dataset_id)
     frame = load_saved_frame(dataset["resolved_path"])
@@ -582,7 +628,14 @@ def improve_indicator(
         raise
     output.insert(0, "timestamp", pd.to_datetime(frame["timestamp"], utc=True))
     records = signals_to_records(output)
+    if not records:
+        pine_path.unlink(missing_ok=True)
+        raise ValueError("AI 過濾後沒有任何做多或做空訊號，因此不建立空版本。")
     added = register_signals(dataset_id, child, f"pinets:{pine_path.name}", records)
+    if added != len(records):
+        delete_indicator_signals(dataset_id, child)
+        pine_path.unlink(missing_ok=True)
+        raise RuntimeError("新版訊號沒有完整寫入，系統已自動回復，請重新執行。")
     direction_counts = {
         direction: sum(record["direction"] == direction for record in records)
         for direction in ("long", "short")
@@ -614,12 +667,19 @@ def improve_indicator(
         "direction_counts": direction_counts,
         "pine_path": str(pine_path),
         "engine": "PineTS",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     STRATEGY_VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    (STRATEGY_VERSIONS_DIR / f"{child}.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    metadata_path = STRATEGY_VERSIONS_DIR / f"{child}.json"
+    try:
+        metadata_path.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception:
+        delete_indicator_signals(dataset_id, child)
+        pine_path.unlink(missing_ok=True)
+        metadata_path.unlink(missing_ok=True)
+        raise
     return metadata
 
 

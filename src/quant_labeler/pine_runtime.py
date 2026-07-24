@@ -139,11 +139,18 @@ def compute_pine_signals(
 
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
+        stack = None
         try:
-            detail = json.loads(detail).get("error", detail)
+            error_payload = json.loads(detail)
+            if isinstance(error_payload, dict):
+                stack = error_payload.get("stack")
+                detail = error_payload.get("error", detail)
         except (json.JSONDecodeError, AttributeError):
             pass
-        raise ValueError(f"PineTS 執行失敗：{detail}")
+        error = ValueError(f"PineTS 執行失敗：{detail}")
+        if stack:
+            error.add_note(str(stack))
+        raise error
     try:
         output = json.loads(result.stdout)
     except json.JSONDecodeError as exc:

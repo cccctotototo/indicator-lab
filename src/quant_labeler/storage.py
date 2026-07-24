@@ -3,13 +3,12 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 
 from .config import DB_PATH, PROJECT_ROOT, ensure_directories
-
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -76,7 +75,7 @@ CREATE TABLE IF NOT EXISTS predictions (
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @contextmanager

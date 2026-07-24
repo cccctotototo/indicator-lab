@@ -5,11 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-import quant_labeler.config as config
-import quant_labeler.labeling as labeling
-import quant_labeler.market as market
-import quant_labeler.ml as ml
-import quant_labeler.storage as storage
+from quant_labeler import config, labeling, market, ml, storage
 from quant_labeler.features import add_features
 
 

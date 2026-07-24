@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import gzip
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ import pandas as pd
 from .config import LABELS, PROJECT_ROOT, SAMPLES_DIR
 from .features import FEATURE_COLUMNS, forward_outcome
 from .market import load_saved_frame
-from .storage import get_signal, upsert_label
+from .storage import delete_label, get_signal, upsert_label
 
 
 def _json_value(value):
@@ -79,7 +80,7 @@ def save_label_snapshot(
         for column in FEATURE_COLUMNS
         if column in signal_row.index
     }
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(UTC).isoformat()
     payload = {
         "schema_version": 1,
         "signal": {
@@ -111,25 +112,40 @@ def save_label_snapshot(
     safe_time = pd.Timestamp(signal["timestamp"]).strftime("%Y%m%dT%H%M%S")
     filename = f"signal_{signal_id}_{signal['symbol']}_{signal['interval']}_{safe_time}.json.gz"
     path = SAMPLES_DIR / label / filename
-    with gzip.open(path, "wt", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    previous_bytes = path.read_bytes() if path.is_file() else None
+    try:
+        with gzip.open(temporary, "wt", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
     relative = str(path.relative_to(PROJECT_ROOT))
-    upsert_label(
-        signal_id,
-        {
-            "label": label,
-            "notes": notes.strip(),
-            "entry_price": outcome["entry_price"],
-            "exit_price": outcome["exit_price"],
-            "pnl_pct": outcome["pnl_pct"],
-            "mfe_pct": outcome["mfe_pct"],
-            "mae_pct": outcome["mae_pct"],
-            "bars_held": int(bars_held),
-            "context_before": int(context_before),
-            "context_after": int(context_after),
-            "sample_path": relative,
-        },
-    )
+    try:
+        upsert_label(
+            signal_id,
+            {
+                "label": label,
+                "notes": notes.strip(),
+                "entry_price": outcome["entry_price"],
+                "exit_price": outcome["exit_price"],
+                "pnl_pct": outcome["pnl_pct"],
+                "mfe_pct": outcome["mfe_pct"],
+                "mae_pct": outcome["mae_pct"],
+                "bars_held": int(bars_held),
+                "context_before": int(context_before),
+                "context_after": int(context_after),
+                "sample_path": relative,
+            },
+        )
+    except Exception:
+        if previous_bytes is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(previous_bytes)
+        raise
     old_relative = signal.get("existing_sample_path")
     if old_relative:
         old_path = (PROJECT_ROOT / old_relative).resolve()
@@ -137,6 +153,25 @@ def save_label_snapshot(
         if old_path != path.resolve() and samples_root in old_path.parents and old_path.exists():
             old_path.unlink()
     return payload
+
+
+def delete_label_snapshot(signal_id: int) -> bool:
+    """Remove both the database label and its locally stored evidence snapshot."""
+    signal = get_signal(signal_id)
+    relative = signal.get("existing_sample_path")
+    target: Path | None = None
+    if relative:
+        path = Path(str(relative))
+        target = (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
+        samples_root = SAMPLES_DIR.resolve()
+        if target == samples_root or samples_root not in target.parents:
+            raise ValueError(f"標記快照不在安全目錄內：{target.name}")
+
+    delete_label(signal_id)
+    if target is not None and target.is_file():
+        target.unlink()
+        return True
+    return False
 
 
 def read_snapshot(path: str | Path) -> dict:

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from .config import INDICATORS_DIR, PROJECT_ROOT
 from .deletion import delete_market, delete_strategy, delete_version_branch, strategy_root
 from .improvement import analyze_indicator, improve_indicator, list_improvements
-from .labeling import locate_signal_index, save_label_snapshot
+from .labeling import delete_label_snapshot, locate_signal_index, save_label_snapshot
 from .market import (
     INTERVAL_MS,
     load_binance_symbol_catalog,
@@ -26,7 +26,6 @@ from .market import (
     sync_full_history,
 )
 from .storage import (
-    delete_label,
     ensure_dataset,
     get_dataset,
     get_signal,
@@ -105,7 +104,7 @@ def _clean(value: Any) -> Any:
 
 
 def _raise_http(exc: Exception) -> None:
-    if isinstance(exc, KeyError):
+    if isinstance(exc, (KeyError, FileNotFoundError)):
         raise HTTPException(status_code=404, detail=str(exc).strip("'")) from exc
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -283,8 +282,12 @@ def label_signal(signal_id: int, request: LabelRequest) -> dict:
 def remove_label(signal_id: int) -> dict:
     try:
         get_signal(signal_id)
-        delete_label(signal_id)
-        return {"deleted": True, "signal_id": signal_id}
+        snapshot_deleted = delete_label_snapshot(signal_id)
+        return {
+            "deleted": True,
+            "signal_id": signal_id,
+            "snapshot_deleted": snapshot_deleted,
+        }
     except Exception as exc:
         _raise_http(exc)
 
@@ -418,6 +421,8 @@ if FRONTEND_DIST.exists():
 
     @app.get("/{path:path}", include_in_schema=False)
     def react_app(path: str):
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="找不到這個 API。")
         requested = (FRONTEND_DIST / path).resolve()
         if path and FRONTEND_DIST.resolve() in requested.parents and requested.is_file():
             return FileResponse(requested)

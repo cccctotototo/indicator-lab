@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -55,7 +55,9 @@ def build_training_frame(
         if signals.empty:
             return pd.DataFrame()
     groups: list[pd.DataFrame] = []
-    for (dataset_id, dataset_path), group in signals.groupby(["dataset_id", "dataset_path"]):
+    for (group_dataset_id, dataset_path), group in signals.groupby(
+        ["dataset_id", "dataset_path"]
+    ):
         path = Path(dataset_path)
         if not path.is_absolute():
             path = PROJECT_ROOT / path
@@ -86,7 +88,7 @@ def build_training_frame(
             axis=1,
         )
         merged = merged.rename(columns={"id": "signal_id", "label": "label_text"})
-        merged.insert(1, "dataset_id", int(dataset_id))
+        merged.insert(1, "dataset_id", int(group_dataset_id))
         merged["direction_short"] = merged["direction"].eq("short").astype(float)
         for feature in FEATURE_COLUMNS:
             if feature not in merged.columns:
@@ -162,14 +164,14 @@ def train_semisupervised(
     probabilities = model.predict_proba(x_all)[:, 1]
     predictions = np.where(probabilities >= 0.5, "win", "loss")
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     name = f"semisupervised_{stamp}"
     model_path = MODELS_DIR / f"{name}.joblib"
     metadata_path = MODELS_DIR / f"{name}.json"
     pseudo_count = int(np.sum((model.transduction_ != -1) & (y_all == -1)))
     metadata = {
         "name": name,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "feature_names": feature_names,
         "labeled_count": labeled_count,
         "unlabeled_count": int((~valid).sum()),

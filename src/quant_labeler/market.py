@@ -55,6 +55,10 @@ class BinanceRateLimitError(RuntimeError):
     """Raised after Binance keeps rejecting a request due to IP rate limits."""
 
 
+class BinanceEmptyDataError(ValueError):
+    """Raised when Binance returns no closed candles for a requested range."""
+
+
 def _request_with_backoff(
     session: requests.Session,
     url: str,
@@ -87,7 +91,7 @@ def _request_with_backoff(
             break
         time.sleep(last_wait)
 
-    wait_text = max(1, int(round(last_wait)))
+    wait_text = max(1, round(last_wait))
     raise BinanceRateLimitError(
         f"Binance 正在限制大量歷史查詢，請等待約 {wait_text} 秒後再試；"
         "已載入的 K 線會保留。"
@@ -167,7 +171,7 @@ def load_binance_symbol_catalog(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
         return rows, None
-    except Exception as exc:
+    except (requests.RequestException, OSError, ValueError, TypeError) as exc:
         if cached:
             return cached, "交易對目錄暫時無法更新，目前使用上次成功同步的完整清單。"
         return fallback_binance_symbols(market_type), f"交易對目錄暫時無法更新：{exc}"
@@ -212,28 +216,30 @@ def fetch_binance_klines(
     cursor = int(start.timestamp() * 1000)
     end_ms = int(end.timestamp() * 1000)
     rows: list[list] = []
-    session = requests.Session()
-    while cursor <= end_ms:
-        response = _request_with_backoff(
-            session,
-            BINANCE_ENDPOINTS[market_type],
-            params={"symbol": symbol.upper().replace("/", ""), "interval": interval, "startTime": cursor, "endTime": end_ms, "limit": 1000},
-            timeout=timeout,
-        )
-        response.raise_for_status()
-        batch = response.json()
-        if not batch:
-            break
-        rows.extend(batch)
-        next_cursor = int(batch[-1][0]) + INTERVAL_MS[interval]
-        if next_cursor <= cursor:
-            break
-        cursor = next_cursor
-        if len(batch) < 1000:
-            break
-        time.sleep(BINANCE_PAGE_PAUSE_SECONDS)
+    with requests.Session() as session:
+        while cursor <= end_ms:
+            response = _request_with_backoff(
+                session,
+                BINANCE_ENDPOINTS[market_type],
+                params={"symbol": symbol.upper().replace("/", ""), "interval": interval, "startTime": cursor, "endTime": end_ms, "limit": 1000},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            batch = response.json()
+            if not batch:
+                break
+            rows.extend(batch)
+            next_cursor = int(batch[-1][0]) + INTERVAL_MS[interval]
+            if next_cursor <= cursor:
+                break
+            cursor = next_cursor
+            if len(batch) < 1000:
+                break
+            time.sleep(BINANCE_PAGE_PAUSE_SECONDS)
     if not rows:
-        raise ValueError("Binance 沒有回傳資料，請檢查幣種、日期或市場類型。")
+        raise BinanceEmptyDataError(
+            "Binance 沒有回傳資料，請檢查幣種、日期或市場類型。"
+        )
     frame = pd.DataFrame(rows, columns=[
         "timestamp", "open", "high", "low", "close", "volume", "close_time",
         "quote_volume", "trades", "taker_base", "taker_quote", "ignore",
@@ -249,13 +255,24 @@ def read_market_csv(source) -> pd.DataFrame:
     return normalize_market_frame(pd.read_csv(source))
 
 
+def _write_frame_atomic(frame: pd.DataFrame, path: Path) -> None:
+    """Replace a market CSV only after the complete new file is on disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        frame.to_csv(temporary, index=False)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def save_market_frame(frame: pd.DataFrame, symbol: str, interval: str, market_type: str) -> Path:
     enriched = add_features(normalize_market_frame(frame))
     start_tag = enriched["timestamp"].min().strftime("%Y%m%d")
     end_tag = enriched["timestamp"].max().strftime("%Y%m%d")
     safe_symbol = "".join(c for c in symbol.upper() if c.isalnum())
     path = MARKET_DIR / f"{safe_symbol}_{market_type}_{interval}_{start_tag}_{end_tag}.csv"
-    enriched.to_csv(path, index=False)
+    _write_frame_atomic(enriched, path)
     return path
 
 
@@ -291,7 +308,7 @@ def _save_history_cache(
     path = history_cache_path(symbol, interval, market_type)
     path.parent.mkdir(parents=True, exist_ok=True)
     enriched = add_features(normalize_market_frame(frame))
-    enriched.to_csv(path, index=False)
+    _write_frame_atomic(enriched, path)
     return path
 
 
@@ -364,9 +381,8 @@ def sync_full_history(
                         market_type,
                     )
                 )
-            except ValueError as exc:
-                if "沒有回傳資料" not in str(exc):
-                    raise
+            except BinanceEmptyDataError:
+                pass
 
         newer_start = pd.Timestamp(cached["timestamp"].max()) + step
         if newer_start < now:
@@ -380,9 +396,8 @@ def sync_full_history(
                         market_type,
                     )
                 )
-            except ValueError as exc:
-                if "沒有回傳資料" not in str(exc):
-                    raise
+            except BinanceEmptyDataError:
+                pass
 
     combined = normalize_market_frame(pd.concat(pieces, ignore_index=True))
     path = _save_history_cache(combined, symbol, interval, market_type)

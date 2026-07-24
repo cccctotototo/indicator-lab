@@ -72,6 +72,42 @@ plotshape(bearish, title = "做空", location = location.abovebar)
     assert output.attrs["short_expression"] == "bearish"
 
 
+def test_pinets_prefers_entry_variables_over_auxiliary_plot_conditions():
+    source = """//@version=6
+indicator("Entry priority", overlay = true)
+pullbackLong = close > open
+pullbackShort = close < open
+longEntry = pullbackLong and close > close[1]
+shortEntry = pullbackShort and close < close[1]
+plotshape(pullbackLong, title = "Long pullback", location = location.belowbar)
+plotshape(longEntry, title = "Long entry", location = location.belowbar)
+plotshape(pullbackShort, title = "Short pullback", location = location.abovebar)
+plotshape(shortEntry, title = "Short entry", location = location.abovebar)
+"""
+
+    output = compute_pine_signals(_frame(), source)
+
+    assert output.attrs["long_expression"] == "longEntry"
+    assert output.attrs["short_expression"] == "shortEntry"
+    assert output["long_signal"].tolist() == [False, False, True, False, True, False]
+    assert output["short_signal"].tolist() == [False, True, False, True, False, True]
+
+
+def test_pinets_keeps_log_output_out_of_json_protocol():
+    source = """//@version=6
+indicator("Logging", overlay = true)
+longSignal = close > open
+shortSignal = close < open
+if longSignal
+    log.info("close {0}", close)
+"""
+
+    output = compute_pine_signals(_frame(), source)
+
+    assert len(output) == len(_frame())
+    assert output.attrs["warnings"]
+
+
 def test_web_import_creates_v1_pine_and_registered_signals(tmp_path, monkeypatch):
     indicators = tmp_path / "indicators"
     indicators.mkdir()

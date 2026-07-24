@@ -11,6 +11,8 @@ const LONG_NAMES = [
   "bullsignal",
   "bull_signal",
   "bullishsignal",
+  "longentry",
+  "longcondition",
   "golong",
   "enterlong",
 ];
@@ -25,9 +27,14 @@ const SHORT_NAMES = [
   "bearsignal",
   "bear_signal",
   "bearishsignal",
+  "shortentry",
+  "shortcondition",
   "goshort",
   "entershort",
 ];
+
+const VISUAL_CALL_PATTERN =
+  /\b(?:plot|plotshape|plotchar|plotarrow|plotbar|plotcandle|hline|fill|bgcolor|barcolor|alert|alertcondition|table\.(?:new|cell|clear|merge_cells|delete|set_\w+)|label\.(?:new|delete|set_\w+)|line\.(?:new|delete|set_\w+)|box\.(?:new|delete|set_\w+)|linefill\.(?:new|delete|set_\w+)|polyline\.(?:new|delete))\s*\(/;
 
 const LONG_WORDS = [
   "long",
@@ -218,7 +225,68 @@ function inferredExpressions(source, explicitLong, explicitShort) {
   return { longExpression, shortExpression };
 }
 
-function instrumentSource(source, explicitLong, explicitShort) {
+function stripVisualStatements(source) {
+  const lines = source.split(/\r?\n/);
+  const output = [];
+  let noopIndex = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!VISUAL_CALL_PATTERN.test(line)) {
+      output.push(line);
+      continue;
+    }
+
+    let balance = 0;
+    let quote = null;
+    let escaped = false;
+    const countBalance = (text) => {
+      for (const char of text) {
+        if (quote !== null) {
+          if (escaped) {
+            escaped = false;
+          } else if (char === "\\") {
+            escaped = true;
+          } else if (char === quote) {
+            quote = null;
+          }
+          continue;
+        }
+        if (char === '"' || char === "'") {
+          quote = char;
+        } else if (char === "(") {
+          balance += 1;
+        } else if (char === ")") {
+          balance -= 1;
+        }
+      }
+    };
+    countBalance(line);
+    while (balance > 0 && index + 1 < lines.length) {
+      index += 1;
+      countBalance(lines[index]);
+    }
+
+    const assignment = line.match(
+      /^(\s*)(?:(varip|var)\s+)?(?:(bool|float|int|string|color|line|label|box|table|linefill|polyline)\s+)?([A-Za-z_]\w*)\s*(:=|=)/,
+    );
+    if (assignment) {
+      const [, indent, qualifier, typeName, name, operator] = assignment;
+      const declaration =
+        operator === "="
+          ? `${qualifier ? `${qualifier} ` : ""}${typeName ? `${typeName} ` : ""}${name} = na`
+          : `${name} := na`;
+      output.push(`${indent}${declaration}`);
+    } else {
+      const indent = line.match(/^\s*/)?.[0] ?? "";
+      noopIndex += 1;
+      output.push(`${indent}_il_visual_noop_${noopIndex} = na`);
+    }
+  }
+  return output.join("\n");
+}
+
+function instrumentSource(source, explicitLong, explicitShort, options = {}) {
   if (!/\bindicator\s*\(/.test(source)) {
     throw new Error("PineTS 指標模式只接受 indicator()，不接受 strategy()。");
   }
@@ -246,7 +314,9 @@ plot((${longExpression}) ? 1 : 0, "__IL_LONG__")
 plot((${shortExpression}) ? 1 : 0, "__IL_SHORT__")
 `;
   return {
-    source: `${source.trimEnd()}\n${suffix}`,
+    source: `${
+      options.signalsOnly ? stripVisualStatements(source).trimEnd() : source.trimEnd()
+    }\n${suffix}`,
     longExpression,
     shortExpression,
   };
@@ -390,23 +460,94 @@ async function main() {
   const raw = await readStdin();
   const request = JSON.parse(raw);
   const bars = normalizeBars(request.bars);
-  const instrumented = instrumentSource(
+  let instrumented = instrumentSource(
     String(request.source ?? ""),
     request.longExpression,
     request.shortExpression,
   );
   const provider = new LocalProvider(bars, request);
-  const pine = new PineTS(
-    provider,
-    String(request.ticker ?? "LOCAL"),
-    String(request.timeframe ?? "15m"),
-    bars.length,
-  );
-  if (request.timezone) {
-    pine.setTimezone(String(request.timezone));
+  const runtimeLogs = [];
+  const originalConsole = {
+    log: console.log,
+    info: console.info,
+    warn: console.warn,
+    debug: console.debug,
+  };
+  const captureLog = (...items) => {
+    if (runtimeLogs.length >= 50) {
+      return;
+    }
+    runtimeLogs.push(
+      items
+        .map((item) => {
+          if (typeof item === "string") {
+            return item;
+          }
+          try {
+            return JSON.stringify(item);
+          } catch {
+            return String(item);
+          }
+        })
+        .join(" ")
+        .slice(0, 500),
+    );
+  };
+  console.log = captureLog;
+  console.info = captureLog;
+  console.warn = captureLog;
+  console.debug = captureLog;
+
+  const execute = async (source) => {
+    const pine = new PineTS(
+      provider,
+      String(request.ticker ?? "LOCAL"),
+      String(request.timeframe ?? "15m"),
+      bars.length,
+    );
+    if (request.timezone) {
+      pine.setTimezone(String(request.timezone));
+    }
+    pine.setAlertMode("all");
+    return pine.run(source, bars.length);
+  };
+
+  let context;
+  let usedSignalsOnlyFallback = false;
+  try {
+    try {
+      context = await execute(instrumented.source);
+    } catch (originalError) {
+      const message =
+        originalError instanceof Error ? originalError.message : String(originalError);
+      if (!/is not a function|is not defined|cannot read propert/i.test(message)) {
+        throw originalError;
+      }
+      const fallback = instrumentSource(
+        String(request.source ?? ""),
+        instrumented.longExpression,
+        instrumented.shortExpression,
+        { signalsOnly: true },
+      );
+      try {
+        context = await execute(fallback.source);
+        instrumented = fallback;
+        usedSignalsOnlyFallback = true;
+      } catch (fallbackError) {
+        const detail =
+          fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        throw new Error(
+          `PineTS 原始模式與純訊號模式都無法執行。原始錯誤：${message}；純訊號錯誤：${detail}`,
+          { cause: fallbackError },
+        );
+      }
+    }
+  } finally {
+    console.log = originalConsole.log;
+    console.info = originalConsole.info;
+    console.warn = originalConsole.warn;
+    console.debug = originalConsole.debug;
   }
-  pine.setAlertMode("all");
-  const context = await pine.run(instrumented.source, bars.length);
   const longValues = plotValues(context, "__IL_LONG__");
   const shortValues = plotValues(context, "__IL_SHORT__");
   const expected = bars.length;
@@ -422,7 +563,13 @@ async function main() {
       short: pad(shortValues),
       longExpression: instrumented.longExpression,
       shortExpression: instrumented.shortExpression,
-      warnings: context.warnings ?? [],
+      warnings: [
+        ...(context.warnings ?? []),
+        ...runtimeLogs,
+        ...(usedSignalsOnlyFallback
+          ? ["PineTS 已自動略過不影響進場條件的繪圖程式後完成執行。"]
+          : []),
+      ],
       engine: "PineTS",
     }),
   );

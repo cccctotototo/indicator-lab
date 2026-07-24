@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-import quant_labeler.market as market
+from quant_labeler import market
 from quant_labeler.market import normalize_market_frame
 
 
@@ -117,7 +117,9 @@ def test_symbol_catalog_keeps_active_perpetuals_and_prioritizes_popular_usdt(mon
 def test_rate_limit_with_long_retry_after_fails_without_repeated_requests(monkeypatch):
     class FakeResponse:
         status_code = 429
-        headers = {"Retry-After": "120"}
+
+        def __init__(self):
+            self.headers = {"Retry-After": "120"}
 
         def raise_for_status(self):
             return None

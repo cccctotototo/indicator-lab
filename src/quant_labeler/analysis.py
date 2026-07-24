@@ -12,8 +12,8 @@ def summary_metrics(labels: pd.DataFrame) -> dict:
     gains = pnl[pnl > 0].sum()
     losses = abs(pnl[pnl < 0].sum())
     return {
-        "total": int(len(labels)),
-        "decisive": int(len(decisive)),
+        "total": len(labels),
+        "decisive": len(decisive),
         "win_rate": float((decisive["label"] == "win").mean() * 100) if len(decisive) else None,
         "avg_pnl": float(pnl.mean()) if len(pnl) else None,
         "profit_factor": float(gains / losses) if losses > 0 else (float("inf") if gains > 0 else None),

@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-
 FEATURE_COLUMNS = [
     "return_1",
     "return_3",

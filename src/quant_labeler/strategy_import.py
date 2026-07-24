@@ -7,7 +7,12 @@ import pandas as pd
 from .config import INDICATORS_DIR
 from .indicators import signals_to_records
 from .pine_runtime import compute_pine_signals
-from .storage import get_dataset, list_signals, register_signals
+from .storage import (
+    delete_indicator_signals,
+    get_dataset,
+    list_signals,
+    register_signals,
+)
 
 
 def normalize_strategy_name(value: str) -> str:
@@ -84,9 +89,10 @@ def import_strategy_v1(
     except Exception:
         pine_path.unlink(missing_ok=True)
         raise
-    if added == 0:
+    if added != len(records):
+        delete_indicator_signals(dataset_id, name)
         pine_path.unlink(missing_ok=True)
-        raise ValueError("訊號已存在，沒有新增任何資料。")
+        raise ValueError("訊號沒有完整寫入，系統已自動回復；請重新匯入。")
 
     counts = {
         direction: sum(record["direction"] == direction for record in records)

@@ -559,6 +559,7 @@ function LabelPage({
   const [barsHeld, setBarsHeld] = useState(initialReview?.selected.bars_held ?? 20);
   const prefetchedReviews = useRef(new Map<number, Promise<ReviewData>>());
   const readyReviews = useRef(new Map<number, ReviewData>());
+  const loadSequence = useRef(0);
 
   const queueNextReview = useCallback((result: ReviewData) => {
     const currentIndex = result.signals.findIndex(
@@ -589,6 +590,7 @@ function LabelPage({
   }, [queueNextReview]);
 
   const load = useCallback(async (signalId?: number) => {
+    const sequence = ++loadSequence.current;
     if (!api.peekReview(dataset.id, strategy.name, signalId)) setBusy(true);
     try {
       const prefetched = signalId ? prefetchedReviews.current.get(signalId) : undefined;
@@ -599,11 +601,12 @@ function LabelPage({
         prefetchedReviews.current.delete(signalId);
         readyReviews.current.delete(signalId);
       }
-      applyReview(result);
+      if (sequence === loadSequence.current) applyReview(result);
     } catch (reason) {
+      if (sequence !== loadSequence.current) return;
       setMessage(reason instanceof Error ? reason.message : "無法載入訊號。");
     } finally {
-      setBusy(false);
+      if (sequence === loadSequence.current) setBusy(false);
     }
   }, [applyReview, dataset.id, strategy.name]);
 
@@ -612,6 +615,7 @@ function LabelPage({
     readyReviews.current.clear();
     void load();
     return () => {
+      loadSequence.current += 1;
       prefetchedReviews.current.clear();
       readyReviews.current.clear();
     };
@@ -627,6 +631,7 @@ function LabelPage({
   };
   const save = async (label: Exclude<Label, null>) => {
     if (!review) return;
+    loadSequence.current += 1;
     const previousReview = review;
     let advancedOptimistically = false;
     let appliedReview: ReviewData | null = null;
@@ -677,7 +682,6 @@ function LabelPage({
       if (readyReview) {
         advance(readyReview);
         advancedOptimistically = true;
-        setBusy(false);
         await labelRequest;
       } else {
         const [, nextReview] = await Promise.all([labelRequest, nextReviewRequest]);
@@ -792,7 +796,9 @@ function LabelPage({
           candles={review.candles}
           signals={review.visible_signals}
           selectedId={review.selected.id}
-          onSelect={(id) => void load(id)}
+          onSelect={(id) => {
+            if (!busy) void load(id);
+          }}
         />
       </section>
 
