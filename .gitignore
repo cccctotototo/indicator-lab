@@ -1,0 +1,47 @@
+# Python environments and generated files
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Local application database and runtime logs
+data/app.db*
+launcher.log
+*.log
+
+# Downloaded market data and local symbol catalog
+data/market/**/*.csv
+data/market/catalog/*.json
+
+# Labels, models and generated strategy records
+data/samples/**/*.json.gz
+data/models/*
+data/strategy_versions/*
+
+# User Pine scripts and generated adapters
+indicators/*.pine
+adapters/*.py
+!adapters/_template.py
+
+# Local exports
+exports/*
+
+# Local design/agent working metadata
+.agents/
+.impeccable/
+
+# Keep empty runtime directories in the repository
+!data/**/.gitkeep
+!indicators/.gitkeep
+!exports/.gitkeep
+
+# Keep shared Streamlit configuration
+!.streamlit/config.toml
