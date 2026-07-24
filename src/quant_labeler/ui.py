@@ -45,6 +45,10 @@ APP_SHELL_STYLE = """
     --il-ink: oklch(0.20 0.012 14);
     --il-muted-ink: oklch(0.47 0.018 14);
     --il-rule: oklch(0.89 0.008 14);
+    --il-profit: #138A72;
+    --il-loss: #D24B39;
+    --il-unlabeled: #777174;
+    --il-selected: #2563EB;
 }
 
 /* Indicator Lab app shell: remove Streamlit chrome without disabling sidebar controls. */
@@ -174,6 +178,39 @@ section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {
     line-height: 1.25;
     white-space: normal;
 }
+
+.signal-status-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    margin: 0.25rem 0 0.75rem;
+    color: var(--il-muted-ink);
+    font-family: "Noto Sans TC", system-ui, sans-serif;
+    font-size: 0.8125rem;
+    line-height: 1.35;
+}
+
+.signal-status-legend__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    white-space: nowrap;
+}
+
+.signal-status-legend__swatch {
+    width: 0.625rem;
+    height: 0.625rem;
+    flex: 0 0 0.625rem;
+    border: 1px solid color-mix(in srgb, currentColor 28%, white);
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.signal-status-legend__item--unlabeled { color: var(--il-unlabeled); }
+.signal-status-legend__item--win { color: var(--il-profit); }
+.signal-status-legend__item--loss { color: var(--il-loss); }
+.signal-status-legend__item--selected { color: var(--il-selected); font-weight: 650; }
 </style>
 """
 
@@ -202,6 +239,28 @@ def page_header(title: str, intro: str) -> None:
     """Render a consistent page heading with native Streamlit components."""
     st.title(title)
     st.caption(intro)
+
+
+def signal_status_legend() -> None:
+    """Explain chart colors with visible text so color never carries meaning alone."""
+    st.html(
+        """
+        <div class="signal-status-legend" aria-label="訊號標記顏色說明">
+            <span class="signal-status-legend__item signal-status-legend__item--unlabeled">
+                <span class="signal-status-legend__swatch" aria-hidden="true"></span>未標記
+            </span>
+            <span class="signal-status-legend__item signal-status-legend__item--win">
+                <span class="signal-status-legend__swatch" aria-hidden="true"></span>盈利
+            </span>
+            <span class="signal-status-legend__item signal-status-legend__item--loss">
+                <span class="signal-status-legend__swatch" aria-hidden="true"></span>虧損
+            </span>
+            <span class="signal-status-legend__item signal-status-legend__item--selected">
+                <span class="signal-status-legend__swatch" aria-hidden="true"></span>目前選中
+            </span>
+        </div>
+        """
+    )
 
 
 def signal_chart(
@@ -308,7 +367,7 @@ def selected_from_chart(event) -> int | None:
     except AttributeError:
         try:
             points = event.get("selection", {}).get("points", [])
-        except Exception:
+        except (AttributeError, TypeError):
             return None
     if not points:
         return None

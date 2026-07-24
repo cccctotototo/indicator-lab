@@ -41,6 +41,7 @@ from quant_labeler.ui import (
     selected_from_chart,
     sidebar_brand,
     signal_chart,
+    signal_status_legend,
 )
 
 PAGE_IMPORT = "匯入策略"
@@ -373,6 +374,7 @@ def render_labeling_page(dataset_id: int, active_indicator: str) -> None:
     )
 
     frame = dataset_frame(dataset_id)
+    signal_status_legend()
     event = st.plotly_chart(
         signal_chart(frame, signals, int(current), "Asia/Taipei", 60),
         width="stretch",
