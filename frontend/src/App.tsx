@@ -91,15 +91,20 @@ function readCachedDatasets(): Dataset[] {
 
 export default function App() {
   const [page, setPage] = useState<Page>(readPageFromHash);
-  const [sidebarOpen, setSidebarOpen] = useState(
-    () => !window.matchMedia("(max-width: 1179px)").matches,
-  );
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [datasets, setDatasets] = useState<Dataset[]>(readCachedDatasets);
   const [datasetId, setDatasetId] = usePersistentNumber("indicator-lab.dataset");
   const [indicator, setIndicator] = useState(localStorage.getItem("indicator-lab.indicator") ?? "");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+  const shellRef = useRef<HTMLDivElement>(null);
+  const topbarRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const sidebarOpenRef = useRef(sidebarOpen);
+  const autoCollapsedRef = useRef(false);
+  const reopenWidthRef = useRef(0);
+  sidebarOpenRef.current = sidebarOpen;
 
   const refreshWorkspace = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -143,12 +148,88 @@ export default function App() {
   }, [page]);
 
   useEffect(() => {
-    const narrowViewport = window.matchMedia("(max-width: 1179px)");
-    const autoCollapseSidebar = (event: MediaQueryListEvent) => {
-      if (event.matches) setSidebarOpen(false);
+    const shell = shellRef.current;
+    const topbar = topbarRef.current;
+    const main = mainRef.current;
+    if (!shell || !topbar || !main) return;
+
+    let frame = 0;
+    const measureFit = () => {
+      frame = 0;
+      const shellWidth = Math.round(shell.getBoundingClientRect().width);
+      if (sidebarOpenRef.current) {
+        const layoutContainers = [
+          topbar,
+          ...main.querySelectorAll<HTMLElement>(
+            [
+              ".page-header",
+              ".review-navigation",
+              ".chart-toolbar",
+              ".label-controls",
+              ".label-details",
+              ".import-workbench",
+              ".metric-band",
+              ".direction-summary",
+              ".evidence-layout",
+              ".version-hero",
+              ".version-summary-band",
+              ".direction-grid",
+            ].join(","),
+          ),
+        ];
+        const containerOverflow = layoutContainers.reduce(
+          (largest, element) =>
+            Math.max(largest, element.scrollWidth - element.clientWidth),
+          0,
+        );
+        const overflow = Math.ceil(
+          Math.max(
+            0,
+            containerOverflow,
+            main.scrollWidth - main.clientWidth,
+            document.documentElement.scrollWidth -
+              document.documentElement.clientWidth,
+          ),
+        );
+        if (overflow > 2) {
+          autoCollapsedRef.current = true;
+          reopenWidthRef.current = shellWidth + overflow + 24;
+          sidebarOpenRef.current = false;
+          setSidebarOpen(false);
+        }
+      } else if (
+        autoCollapsedRef.current &&
+        shellWidth >= reopenWidthRef.current
+      ) {
+        autoCollapsedRef.current = false;
+        sidebarOpenRef.current = true;
+        setSidebarOpen(true);
+      }
     };
-    narrowViewport.addEventListener("change", autoCollapseSidebar);
-    return () => narrowViewport.removeEventListener("change", autoCollapseSidebar);
+    const scheduleFitCheck = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(measureFit);
+    };
+
+    const sizeObserver = new ResizeObserver(scheduleFitCheck);
+    sizeObserver.observe(shell);
+    sizeObserver.observe(topbar);
+    sizeObserver.observe(main);
+    const contentObserver = new MutationObserver(scheduleFitCheck);
+    contentObserver.observe(main, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    window.addEventListener("resize", scheduleFitCheck, { passive: true });
+    scheduleFitCheck();
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      sizeObserver.disconnect();
+      contentObserver.disconnect();
+      window.removeEventListener("resize", scheduleFitCheck);
+    };
   }, []);
 
   const activeDataset = datasets.find((item) => item.id === datasetId) ?? null;
@@ -185,9 +266,21 @@ export default function App() {
     setIndicator(value);
     localStorage.setItem("indicator-lab.indicator", value);
   };
+  const toggleSidebar = () => {
+    autoCollapsedRef.current = false;
+    reopenWidthRef.current = 0;
+    setSidebarOpen((value) => {
+      const next = !value;
+      sidebarOpenRef.current = next;
+      return next;
+    });
+  };
 
   return (
-    <div className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
+    <div
+      ref={shellRef}
+      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}
+    >
       <a className="skip-link" href="#main-content">跳到主要內容</a>
       <aside className="sidebar">
         <div className="brand">
@@ -198,7 +291,7 @@ export default function App() {
           </span>
           <button
             className="icon-button sidebar-toggle"
-            onClick={() => setSidebarOpen((value) => !value)}
+            onClick={toggleSidebar}
             aria-label={sidebarOpen ? "收合側邊欄" : "展開側邊欄"}
             title={sidebarOpen ? "收合側邊欄" : "展開側邊欄"}
           >
@@ -275,7 +368,7 @@ export default function App() {
         </div>
       </aside>
 
-      <header className="topbar">
+      <header ref={topbarRef} className="topbar">
         <div className="topbar-page">
           <span>步驟 {NAV.findIndex((item) => item.id === page) + 1}／4</span>
           <strong>{NAV.find((item) => item.id === page)?.label}</strong>
@@ -291,7 +384,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="main-canvas" id="main-content" tabIndex={-1}>
+      <main ref={mainRef} className="main-canvas" id="main-content" tabIndex={-1}>
         {loading && datasets.length === 0 ? (
           <LoadingState variant="workspace" />
         ) : error ? (
