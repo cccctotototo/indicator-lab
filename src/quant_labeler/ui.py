@@ -16,6 +16,26 @@ TIMEZONES = [
     "Europe/London",
 ]
 
+SIGNAL_STATUS_COLORS = {
+    "win": "#138A72",
+    "loss": "#D24B39",
+    "breakeven": "#587189",
+    "invalid": "#8B8588",
+    "unlabeled": "#777174",
+    "selected": "#2563EB",
+}
+
+
+def signal_marker_color(
+    label: str | None,
+    signal_id: int,
+    selected_id: int | None,
+) -> str:
+    """Return a semantic status color, with the current signal in focus blue."""
+    if selected_id is not None and signal_id == selected_id:
+        return SIGNAL_STATUS_COLORS["selected"]
+    return SIGNAL_STATUS_COLORS.get(label or "unlabeled", SIGNAL_STATUS_COLORS["unlabeled"])
+
 
 APP_SHELL_STYLE = """
 <style>
@@ -233,14 +253,10 @@ def signal_chart(
         if part.empty:
             continue
         part["display_time"] = part["timestamp"].dt.tz_convert(timezone_name)
-        marker_colors = part["label"].map(
-            {
-                "win": "#138A72",
-                "loss": "#D24B39",
-                "breakeven": "#587189",
-                "invalid": "#8B8588",
-            }
-        ).fillna(color)
+        marker_colors = [
+            signal_marker_color(row.label, int(row.id), selected_id)
+            for row in part.itertuples(index=False)
+        ]
         fig.add_trace(
             go.Scatter(
                 x=part["display_time"],
@@ -250,7 +266,7 @@ def signal_chart(
                 marker={
                     "symbol": symbol,
                     "size": [
-                        15 if selected_id == int(value) else 11
+                        16 if selected_id == int(value) else 11
                         for value in part["id"]
                     ],
                     "color": marker_colors,
