@@ -91,7 +91,9 @@ function readCachedDatasets(): Dataset[] {
 
 export default function App() {
   const [page, setPage] = useState<Page>(readPageFromHash);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => !window.matchMedia("(max-width: 1179px)").matches,
+  );
   const [datasets, setDatasets] = useState<Dataset[]>(readCachedDatasets);
   const [datasetId, setDatasetId] = usePersistentNumber("indicator-lab.dataset");
   const [indicator, setIndicator] = useState(localStorage.getItem("indicator-lab.indicator") ?? "");
@@ -139,6 +141,15 @@ export default function App() {
   useEffect(() => {
     window.history.replaceState(null, "", `#${page}`);
   }, [page]);
+
+  useEffect(() => {
+    const narrowViewport = window.matchMedia("(max-width: 1179px)");
+    const autoCollapseSidebar = (event: MediaQueryListEvent) => {
+      if (event.matches) setSidebarOpen(false);
+    };
+    narrowViewport.addEventListener("change", autoCollapseSidebar);
+    return () => narrowViewport.removeEventListener("change", autoCollapseSidebar);
+  }, []);
 
   const activeDataset = datasets.find((item) => item.id === datasetId) ?? null;
   const strategies = activeDataset?.strategies ?? [];
@@ -275,8 +286,8 @@ export default function App() {
           <small>{indicator || "請先匯入策略"}</small>
         </div>
         <div className="topbar-status">
-          <span className="status-dot" />
-          本機工作區
+          <span className="status-dot" aria-hidden="true" />
+          <span className="topbar-status-label">本機工作區</span>
         </div>
       </header>
 
