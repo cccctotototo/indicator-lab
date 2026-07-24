@@ -479,7 +479,7 @@ function OperationBuffer({
   steps?: string[];
 }) {
   return (
-    <div className="operation-buffer" role="status" aria-live="polite">
+    <div className="operation-buffer workspace-edge" role="status" aria-live="polite">
       <LoaderCircle className="spin" size={17} />
       <span className="operation-copy">
         <strong>{title}</strong>
@@ -531,7 +531,7 @@ function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <header className="page-header">
+    <header className="page-header workspace-edge">
       <div>
         <span className="eyebrow">{step}</span>
         <h1>{title}</h1>
@@ -746,7 +746,7 @@ function LabelPage({
         title={`標記 ${strategy.name}`}
         description="只判斷這次訊號結果；儲存後立即前往下一筆，所有標記都能返回修改。"
       />
-      <section className={`review-strip ${busy ? "is-loading" : ""}`} aria-busy={busy}>
+      <section className={`review-strip workspace-edge ${busy ? "is-loading" : ""}`} aria-busy={busy}>
         {busy && <span className="panel-loading-bar" aria-hidden="true" />}
         <div className="progress-line">
           <span>
@@ -778,7 +778,7 @@ function LabelPage({
         </div>
       </section>
 
-      <section className="chart-panel">
+      <section className="chart-panel workspace-edge">
         <div className="chart-toolbar">
           <div className="legend">
             <span><i className="marker gray" />未標記</span>
@@ -796,7 +796,7 @@ function LabelPage({
         />
       </section>
 
-      <section className="label-dock">
+      <section className="label-dock workspace-edge">
         <div className="label-controls">
           <button className="label-button win" onClick={() => void save("win")} disabled={busy}>
             <Check size={20} /><span><strong>盈利</strong><small>這筆訊號有效獲利</small></span><kbd>W</kbd>
@@ -878,7 +878,7 @@ function ImportPage({
           detail="已保留你填寫的內容；完成後會直接前往標記頁。"
         />
       )}
-      <form className="import-workbench" onSubmit={submit}>
+      <form className="import-workbench workspace-edge" onSubmit={submit}>
         <section className="form-column">
           <h2>策略資料</h2>
           <label>策略名稱<input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 wickless_candle" required /></label>
@@ -966,13 +966,13 @@ function AnalysisPage({
           steps={["整理人工標記", "分方向搜尋數值規則", "驗證並建立版本"]}
         />
       )}
-      <section className="metric-band">
+      <section className="metric-band workspace-edge">
         <Metric label="實際勝率" value={formatRate(analysis.overall.win_rate)} note={`${analysis.overall.wins} 勝／${analysis.overall.losses} 輸`} />
         <Metric label="有效標記" value={analysis.decisive.toLocaleString()} note={`未標記 ${analysis.remaining.toLocaleString()} 筆`} />
         <Metric label="做多" value={formatRate(analysis.directions.long.win_rate)} note={`${analysis.directions.long.samples} 筆`} />
         <Metric label="做空" value={formatRate(analysis.directions.short.win_rate)} note={`${analysis.directions.short.samples} 筆`} />
       </section>
-      <section className="direction-summary-grid" aria-label="做多與做空分析摘要">
+      <section className="direction-summary-grid workspace-edge" aria-label="做多與做空分析摘要">
         {([
           ["long", "做多", TrendingUp, analysis.directions.long],
           ["short", "做空", TrendingDown, analysis.directions.short],
@@ -992,7 +992,7 @@ function AnalysisPage({
         ))}
       </section>
       {message && <p className="inline-error">{message}</p>}
-      <div className="evidence-layout">
+      <div className="evidence-layout workspace-edge">
         <section className="evidence-table">
           <div className="section-heading"><div><span className="eyebrow">人工證據</span><h2>盈利與虧損的特徵差異</h2></div><span>{analysis.feature_comparison.length} 個可比較特徵</span></div>
           {analysis.feature_comparison.length ? (
@@ -1095,21 +1095,21 @@ function VersionsPage({
           detail="完成前保留目前內容，避免畫面突然變空。"
         />
       )}
-      <div className="version-tabs" role="tablist">
+      <div className="version-tabs workspace-edge" role="tablist">
         {versions.map((version) => <button key={version.name} role="tab" aria-selected={version.name === current.name} className={version.name === current.name ? "active" : ""} onClick={() => setSelected(version.name)}><strong>V{version.version}</strong><span>{formatRate(version.win_rate)}</span><small>{version.labeled.toLocaleString()} 筆標記</small></button>)}
       </div>
       {message && <p className={message.includes("已複製") ? "inline-success" : "inline-error"}>{message}</p>}
-      <section className="version-hero">
+      <section className="version-hero workspace-edge">
         <div><span className="eyebrow">V{current.version} · {current.version === 1 ? "原始策略" : "AI 改善版本"}</span><h1>{current.name}</h1><p>{metadata?.rule_text ?? "你的原始多空條件，沒有套用 AI 過濾。"}</p></div>
         <div className="hero-rate"><span>綜合實際</span><strong>{formatRate(current.win_rate)}</strong><small>{current.wins} 勝／{current.losses} 輸</small></div>
       </section>
-      <section className="version-summary-band" aria-label="版本標記摘要">
+      <section className="version-summary-band workspace-edge" aria-label="版本標記摘要">
         <div className="version-stat primary-stat"><Database size={18} /><span><small>總共已標記</small><strong>{current.labeled.toLocaleString()} 筆</strong></span></div>
         <div className="version-stat"><Check size={18} /><span><small>盈利</small><strong>{current.wins.toLocaleString()}</strong></span></div>
         <div className="version-stat"><X size={18} /><span><small>虧損</small><strong>{current.losses.toLocaleString()}</strong></span></div>
         <div className="version-stat"><Activity size={18} /><span><small>無效</small><strong>{current.invalid.toLocaleString()}</strong></span></div>
       </section>
-      <div className="direction-grid">
+      <div className="direction-grid workspace-edge">
         {(["long", "short"] as const).map((direction) => {
           const count = direction === "long" ? current.long : current.short;
           const rules = metadata?.direction_results?.[direction]?.rules ?? [];
