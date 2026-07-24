@@ -338,8 +338,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand); box-shad
   background: transparent;
   pointer-events: auto;
 }
-.chart-signal-triangle.up { transform: translate(calc(-50% + 1px), 1px); }
-.chart-signal-triangle.down { transform: translate(calc(-50% + 1px), calc(-100% - 1px)); }
+.chart-signal-triangle.up { transform: translate(-50%, 1px); }
+.chart-signal-triangle.down { transform: translate(-50%, calc(-100% - 1px)); }
 .chart-signal-triangle::before {
   content: "";
   position: absolute;
