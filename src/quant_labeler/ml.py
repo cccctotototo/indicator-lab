@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 import joblib
@@ -19,6 +20,24 @@ from .config import MODELS_DIR, PROJECT_ROOT
 from .features import FEATURE_COLUMNS
 from .market import load_saved_frame
 from .storage import add_model_run, list_signals, save_predictions
+
+
+@lru_cache(maxsize=8)
+def _feature_lookup(path_text: str, modified_ns: int) -> pd.DataFrame:
+    """Keep the immutable candle feature index ready for repeated label analysis."""
+    del modified_ns
+    frame = load_saved_frame(path_text)
+    feature_columns = [
+        feature for feature in FEATURE_COLUMNS if feature in frame.columns
+    ]
+    lookup = frame[["timestamp", *feature_columns]].copy()
+    if not isinstance(lookup["timestamp"].dtype, pd.DatetimeTZDtype):
+        lookup["timestamp"] = pd.to_datetime(lookup["timestamp"], utc=True)
+    return (
+        lookup.sort_values("timestamp")
+        .drop_duplicates("timestamp", keep="last")
+        .set_index("timestamp")
+    )
 
 
 def build_training_frame(
@@ -40,13 +59,11 @@ def build_training_frame(
         path = Path(dataset_path)
         if not path.is_absolute():
             path = PROJECT_ROOT / path
-        frame = load_saved_frame(path)
-        feature_columns = [
-            feature for feature in FEATURE_COLUMNS if feature in frame.columns
-        ]
-        candles = frame[["timestamp", *feature_columns]].copy()
-        candles["timestamp"] = pd.to_datetime(candles["timestamp"], utc=True)
-        candles = candles.sort_values("timestamp")
+        resolved_path = path.resolve()
+        candles = _feature_lookup(
+            str(resolved_path),
+            resolved_path.stat().st_mtime_ns,
+        )
         signal_rows = group[
             [
                 "id",
@@ -60,11 +77,13 @@ def build_training_frame(
         ].copy()
         signal_rows["timestamp"] = pd.to_datetime(signal_rows["timestamp"], utc=True)
         signal_rows = signal_rows.sort_values("timestamp")
-        merged = pd.merge_asof(
-            signal_rows,
-            candles,
-            on="timestamp",
-            direction="nearest",
+        positions = candles.index.get_indexer(signal_rows["timestamp"], method="nearest")
+        feature_rows = candles.iloc[np.maximum(positions, 0)].reset_index(drop=True)
+        if (positions < 0).any():
+            feature_rows.loc[positions < 0, :] = np.nan
+        merged = pd.concat(
+            [signal_rows.reset_index(drop=True), feature_rows],
+            axis=1,
         )
         merged = merged.rename(columns={"id": "signal_id", "label": "label_text"})
         merged.insert(1, "dataset_id", int(dataset_id))

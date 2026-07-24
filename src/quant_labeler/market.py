@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -258,10 +259,20 @@ def save_market_frame(frame: pd.DataFrame, symbol: str, interval: str, market_ty
     return path
 
 
-def load_saved_frame(path: str | Path) -> pd.DataFrame:
+@lru_cache(maxsize=8)
+def _cached_saved_frame(path: str, modified_ns: int) -> pd.DataFrame:
+    del modified_ns
     df = pd.read_csv(path)
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
     return df
+
+
+def load_saved_frame(path: str | Path) -> pd.DataFrame:
+    resolved = Path(path).resolve()
+    return _cached_saved_frame(
+        str(resolved),
+        resolved.stat().st_mtime_ns,
+    ).copy(deep=False)
 
 
 def history_cache_path(symbol: str, interval: str, market_type: str) -> Path:

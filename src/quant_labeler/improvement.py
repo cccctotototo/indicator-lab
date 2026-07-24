@@ -383,6 +383,43 @@ def _pine_expression(rule: dict, prefix: str) -> str:
     return f"({variable} >= {rule['low']:.10g} and {variable} <= {rule['high']:.10g})"
 
 
+def _signal_output_insertion_point(
+    source: str,
+    long_expression: str,
+    short_expression: str,
+) -> int:
+    """Insert filters after signal declarations, before their visual/alert outputs."""
+    expressions = f"{long_expression}\n{short_expression}"
+    expression_names = set(re.findall(r"\b[A-Za-z_]\w*\b", expressions))
+    declaration_ends: list[int] = []
+    for name in expression_names:
+        declaration = re.compile(
+            rf"(?m)^[ \t]*(?:(?:var|varip)\s+)?"
+            rf"(?:(?:bool|int|float|color|string)\s+)?"
+            rf"{re.escape(name)}\s*=(?!=)"
+        )
+        declaration_ends.extend(
+            source.find("\n", match.end()) + 1
+            for match in declaration.finditer(source)
+        )
+    after_declarations = max(declaration_ends, default=0)
+    output_positions = [
+        position
+        for marker in (
+            "plotshape(",
+            "plotchar(",
+            "strategy.entry(",
+            "alertcondition(",
+        )
+        if (position := source.find(marker, after_declarations)) >= 0
+    ]
+    if not output_positions:
+        raise ValueError(
+            "Pine 找不到位於多空訊號宣告後的輸出，無法安全插入過濾器。"
+        )
+    return min(output_positions)
+
+
 def _write_pine(
     root: str,
     child: str,
@@ -396,14 +433,11 @@ def _write_pine(
     if not source_path.exists():
         raise FileNotFoundError(f"找不到原始 Pine：{source_path.name}")
     source = source_path.read_text(encoding="utf-8")
-    insertion_points = [
-        position
-        for marker in ("plotshape(", "strategy.entry(", "alertcondition(")
-        if (position := source.find(marker)) >= 0
-    ]
-    split_at = min(insertion_points) if insertion_points else -1
-    if split_at < 0:
-        raise ValueError("Pine 找不到 plotshape、strategy.entry 或 alertcondition，無法插入過濾器。")
+    split_at = _signal_output_insertion_point(
+        source,
+        base_long_expression,
+        base_short_expression,
+    )
     head, tail = source[:split_at], source[split_at:]
     prefix = f"aiV{version}"
     long_expression = " and ".join(
@@ -430,7 +464,34 @@ improvedShortSignal = ({base_short_expression}) and {prefix}ShortFilter
     def replace_condition(text: str, expression: str, replacement: str) -> str:
         if re.fullmatch(r"[A-Za-z_]\w*", expression):
             return re.sub(rf"\b{re.escape(expression)}\b", replacement, text)
-        return text.replace(expression, replacement)
+        replaced = text.replace(expression, replacement)
+        if replaced != text:
+            return replaced
+
+        # PineTS may combine plotshape and alertcondition into one inferred
+        # expression. Replace its latest declared signal variable in the output
+        # section instead of requiring that synthetic combined text to exist.
+        declarations: dict[str, int] = {}
+        for name in set(re.findall(r"\b[A-Za-z_]\w*\b", expression)):
+            pattern = re.compile(
+                rf"(?m)^[ \t]*(?:(?:var|varip)\s+)?"
+                rf"(?:(?:bool|int|float|color|string)\s+)?"
+                rf"{re.escape(name)}\s*=(?!=)"
+            )
+            matches = list(pattern.finditer(source))
+            if matches:
+                declarations[name] = matches[-1].start()
+        if not declarations:
+            return text
+        latest = max(declarations.values())
+        for name, position in declarations.items():
+            if position == latest:
+                replaced = re.sub(
+                    rf"\b{re.escape(name)}\b",
+                    replacement,
+                    replaced,
+                )
+        return replaced
 
     tail = replace_condition(tail, base_long_expression, "improvedLongSignal")
     tail = replace_condition(tail, base_short_expression, "improvedShortSignal")
@@ -505,15 +566,20 @@ def improve_indicator(
         base_long_expression,
         base_short_expression,
     )
-    output = compute_pine_signals(
-        frame,
-        pine_path.read_text(encoding="utf-8"),
-        ticker=str(dataset.get("symbol") or "LOCAL"),
-        timeframe=str(dataset.get("interval") or "15m"),
-        timezone=str(dataset.get("timezone") or "UTC"),
-        long_expression="improvedLongSignal",
-        short_expression="improvedShortSignal",
-    )
+    try:
+        output = compute_pine_signals(
+            frame,
+            pine_path.read_text(encoding="utf-8"),
+            ticker=str(dataset.get("symbol") or "LOCAL"),
+            timeframe=str(dataset.get("interval") or "15m"),
+            timezone=str(dataset.get("timezone") or "UTC"),
+            long_expression="improvedLongSignal",
+            short_expression="improvedShortSignal",
+        )
+    except Exception:
+        # A failed child must not remain as an unregistered strategy file.
+        pine_path.unlink(missing_ok=True)
+        raise
     output.insert(0, "timestamp", pd.to_datetime(frame["timestamp"], utc=True))
     records = signals_to_records(output)
     added = register_signals(dataset_id, child, f"pinets:{pine_path.name}", records)

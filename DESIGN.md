@@ -1,180 +1,109 @@
 ---
-name: Indicator Lab
-description: 可追溯的指標訊號標註、贏輸分析與半監督式學習工作台
-colors:
-  signal-red: "oklch(0.57 0.18 14)"
-  signal-red-deep: "oklch(0.43 0.14 14)"
-  canvas: "oklch(1 0 0)"
-  work-surface: "oklch(0.975 0.004 14)"
-  ink: "oklch(0.20 0.012 14)"
-  muted-ink: "oklch(0.47 0.018 14)"
-  rule: "oklch(0.89 0.008 14)"
-  profit: "oklch(0.55 0.14 165)"
-  profit-soft: "oklch(0.97 0.02 165)"
-  profit-border: "oklch(0.84 0.04 165)"
-  profit-ink: "oklch(0.35 0.09 165)"
-  loss: "oklch(0.58 0.19 25)"
-  loss-soft: "oklch(0.97 0.025 25)"
-  loss-border: "oklch(0.84 0.07 25)"
-  loss-ink: "oklch(0.42 0.14 25)"
-  info: "oklch(0.52 0.12 245)"
-  info-soft: "oklch(0.97 0.018 245)"
-  info-border: "oklch(0.88 0.035 245)"
-  info-ink: "oklch(0.34 0.08 245)"
-typography:
-  headline:
-    fontFamily: "Inter, Noto Sans TC, system-ui, sans-serif"
-    fontSize: "1.5rem"
-    fontWeight: 700
-    lineHeight: 1.25
-    letterSpacing: "-0.02em"
-  body:
-    fontFamily: "Inter, Noto Sans TC, system-ui, sans-serif"
-    fontSize: "0.9375rem"
-    fontWeight: 400
-    lineHeight: 1.55
-  label:
-    fontFamily: "Inter, Noto Sans TC, system-ui, sans-serif"
-    fontSize: "0.8125rem"
-    fontWeight: 600
-    lineHeight: 1.35
-rounded:
-  sm: "6px"
-  md: "10px"
-  lg: "14px"
-  pill: "999px"
-spacing:
-  xs: "4px"
-  sm: "8px"
-  md: "16px"
-  lg: "24px"
-  xl: "32px"
-components:
-  button-primary:
-    backgroundColor: "{colors.signal-red}"
-    textColor: "{colors.canvas}"
-    rounded: "{rounded.sm}"
-    padding: "10px 16px"
-  panel:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.md}"
-    padding: "16px"
+name: Indicator Lab Research Console
+status: canonical
+platform: desktop-web
+theme: light
+updated: 2026-07-24
 ---
 
-# Design System: Indicator Lab
+# 1. Purpose
 
-## Overview
+Indicator Lab 是本機量化研究工作台。介面只服務四件事：匯入 Pine、標記訊號、分析改善、管理版本。設計必須讓使用者清楚知道目前市場、策略、步驟、標記進度與版本證據，不能用裝飾掩蓋資料。
 
-**Creative North Star: "The Annotated Research Desk"**
+# 2. Creative North Star — The Research Ledger
 
-這是一張白天使用的研究桌：乾淨白底讓 K 線與資料保有最高辨識度，深墨文字提供長時間閱讀的穩定感，帶酒紅的品牌色只標示目前焦點與主要動作。介面密度接近專業分析工具，但每個區塊都有清楚任務，不以裝飾製造專業感。
+整體像一冊嚴謹的研究紀錄：深色控制側欄是目錄，淺色主畫布是證據頁。視覺專業、克制、規律，保留少量品牌紅作為位置與主要動作提示。它不是聊天機器人，也不是炫技 AI 儀表板。
 
-**Key Characteristics:**
+# 3. Information Architecture
 
-- 研究優先、證據可追溯、結論克制。
-- 大型圖表居中，控制項沿任務順序排列。
-- 語意色固定：青綠為獲利、橙紅為虧損、藍為資訊。
-- 狀態變化快速且安靜，不使用進場動畫。
+- 固定四步驟：匯入策略 → 標記訊號 → AI 改善 → 策略版本。
+- 展開側欄顯示完整導航、資料集與策略選擇。
+- 收合側欄保留 72px 圖示列，主內容自動擴張。
+- 頂部列持續顯示目前步驟、市場、週期、策略與本機狀態。
+- 每頁只保留一個主要動作，其餘動作降為次要。
 
-## Colors
+# 4. Color Tokens
 
-採 restrained 策略：純白畫布、略帶品牌色相的中性色，以及少量高辨識語意色。
+| Token | Value | Usage |
+|---|---:|---|
+| `--brand` | `#C9344A` | 主要動作、目前流程、焦點 |
+| `--brand-dark` | `#A8253B` | Hover / pressed |
+| `--brand-soft` | `#F8E8EC` | 選取背景 |
+| `--sidebar` | `#181B23` | 研究側欄 |
+| `--sidebar-raised` | `#222630` | 側欄互動狀態 |
+| `--canvas` | `#F5F6F8` | 主背景 |
+| `--panel` | `#FFFFFF` | 卡片、表格、表單 |
+| `--ink` | `#1C2430` | 主要文字 |
+| `--muted` | `#667085` | 次要文字 |
+| `--line` | `#E2E6EB` | 邊框與分隔 |
+| `--green` | `#137A68` | 盈利 |
+| `--red` | `#C44737` | 虧損與危險動作 |
+| `--blue` | `#2563EB` | 目前選取訊號 |
+| `--gray-marker` | `#7B808A` | 未標記訊號 |
 
-### Primary
+# 5. Typography
 
-- **Signal Red**：只用於品牌焦點、目前訊號與主要提交動作；不可用於大面積背景。
+- 介面字體：`Segoe UI`, `Noto Sans TC`, `Microsoft JhengHei`, system-ui。
+- 數字使用 tabular figures，讓勝率、筆數、日期穩定對齊。
+- 頁面標題 28–32px / 700；區塊標題 16–18px / 650；正文 13–14px / 400–500。
+- Pine 程式碼與技術欄位才使用等寬字體。
+- 不使用過度緊縮字距、全大寫長標題或巨大首頁式標語。
 
-### Secondary
+# 6. Shape, Spacing, Elevation
 
-- **Profit Teal**：僅表示獲利或正向結果，必須搭配文字。
-- **Loss Vermilion**：僅表示虧損、錯誤與破壞性動作，必須搭配文字。
-- **Evidence Blue**：資訊提示、模型證據與連結。
+- 4px / 8px 間距系統。
+- 控制項 8px 圓角；大型面板 10–12px 圓角。
+- 主要控制高度至少 42px。
+- 面板以清楚邊框分層；陰影只用於 Toast、浮層和必要的固定工具列。
+- 不使用漸層、玻璃效果、霓虹、發光、裝飾性網格或過量 AI 星芒。
 
-### Neutral
+# 7. Page Rules
 
-- **Canvas White**：主畫布。
-- **Work Surface**：側欄、工具列與分組背景。
-- **Research Ink**：主要文字。
-- **Rule**：細邊界與分隔。
+## 匯入策略
 
-**The Semantic Color Rule.** 紅綠不得單獨承擔意義；每個狀態都必須有文字或符號。
+- 市場設定與 Pine 編輯器同頁左右排列。
+- 表單先交代策略名稱與資料來源，再提供進階市場欄位。
+- 執行時保留全部輸入，顯示具體處理階段。
 
-## Typography
+## 標記訊號
 
-**Display Font:** Inter（Noto Sans TC 與 system-ui 後備）  
-**Body Font:** Inter（Noto Sans TC 與 system-ui 後備）
+- 進度、上一筆、訊號資訊、下一筆在同一視覺區。
+- 圖表最大化；三角形分別表示未標記、盈利、虧損、目前選取。
+- 盈利、虧損、無效按鈕維持圖表下方，提供 W / L / I 快捷鍵。
+- 持有 K 棒、備註、清除標記放入「進階標記設定」展開區。
+- 操作先即時更新畫面，再在背景完成儲存。
 
-**Character:** 單一無襯線字族維持分析工具的一致性；數字啟用等寬數字特性，繁體中文保持正常字距。
+## AI 改善
 
-### Hierarchy
+- 顯示實際勝率、有效標記、做多與做空結果。
+- 做多、做空以左右並排證據卡呈現。
+- 規則搜尋時顯示三階段狀態，不使用虛假百分比。
 
-- **Headline**（700、24px、1.25）：頁面任務名稱。
-- **Title**（650、17px、1.35）：區段與圖表標題。
-- **Body**（400、15px、1.55）：說明、表格與操作內容。
-- **Label**（600、13px、1.35）：欄位、狀態與輔助資訊，不強制大寫。
+## 策略版本
 
-**The Numbers Stay Still Rule.** 所有價格、百分比與時間欄位使用 tabular-nums，更新時不造成水平跳動。
+- 依 V1、V2、V3…順序選擇。
+- 首屏必須顯示：綜合勝率、總標記數、勝、輸、無效。
+- 做多與做空規則左右並列且預設展開。
+- 複製 Pine 是主要版本操作；刪除明確分離並需確認。
 
-## Elevation
+# 8. Responsive and Performance
 
-系統預設扁平，以色調層次與 1px 邊界區分結構。陰影只用於浮動提示與需要脫離頁面的選單，不把每個內容區塊做成漂浮卡片。
+- 以桌面為主，適配 1024px、1280px、1440px、1920px。
+- 側欄收合後永遠留下可恢復的窄圖示列。
+- 低於 1180px 時雙欄區域可改單欄，不允許水平溢出。
+- 內容載入超過 300ms 才顯示骨架；切頁保留穩定高度，避免白畫面。
+- 動畫 120–180ms，只使用 opacity / transform；尊重 reduced-motion。
 
-**The Flat-by-Default Rule.** 靜止內容沒有陰影；如果所有區塊都浮起來，就沒有任何區塊真正重要。
+# 9. Accessibility
 
-## Components
+- 所有 icon-only 按鈕必須有 `aria-label` 與可見焦點。
+- 目前導覽使用 `aria-current`；所有表單都有可見標籤。
+- 色彩之外，同時使用文字、圖示或形狀表達狀態。
+- 支援鍵盤完成主要標記工作，且輸入欄位聚焦時不觸發快捷鍵。
+- 文字與背景維持 WCAG AA 對比。
 
-### Buttons
+# 10. Non-goals
 
-- **Shape:** 緊湊圓角（6px），高度至少 40px。
-- **Primary:** Signal Red 白字，專用於載入、保存與訓練等主要動作。
-- **Hover / Focus:** 明度降低；焦點使用 2px Evidence Blue 外框。
-- **Secondary:** 白底 Research Ink，1px Rule 邊界。
-
-### Chips
-
-- **Style:** 輕色語意背景、深色文字、完整狀態名稱。
-- **State:** 目前篩選器使用細品牌色外框，不使用大面積填色。
-
-### Cards / Containers
-
-- **Corner Style:** 10px。
-- **Background:** Canvas White 或 Work Surface。
-- **Shadow Strategy:** 無陰影；以邊界與間距建立層次。
-- **Border:** 1px Rule。
-- **Internal Padding:** 16px 或 24px。
-
-### Inputs / Fields
-
-- **Style:** 白底、1px Rule、6px 圓角，高度至少 40px。
-- **Focus:** Evidence Blue 2px 外框。
-- **Error / Disabled:** 清楚文字說明，禁用狀態仍維持可讀對比。
-
-### Navigation
-
-側欄依工作流排序，使用 Streamlit 原生圓形單選元件；啟用項目只使用品牌色圓點與較粗文字，不增加白底方框。主內容上方保留四步工作流，協助辨識目前進度。窄螢幕時使用 Streamlit 原生收合，不建立自訂抽屜。
-
-### Signal Review Stage
-
-K 線圖是最大視覺物件；上方依序顯示上一筆、目前訊號摘要、下一筆。方向、時間、序號與目前標記必須同時可讀；下方保留「贏」、「輸」、「無效」三個清楚決策。
-
-### Strategy Versions
-
-版本頁採 master-detail：上方選擇 V1、V2…，下方一次只顯示一個版本。選中版本仍須完整列出做多與做空的實際結果、全部有效過濾值、規則來源與後段驗證；Pine 與刪除操作使用漸進揭露，避免所有版本同時展開造成資訊噪音。
-
-## Do's and Don'ts
-
-### Do:
-
-- **Do** 先顯示樣本數、資料範圍與來源，再顯示模型結論。
-- **Do** 讓每個標註能回到訊號周邊 K 線與完整特徵快照。
-- **Do** 將贏與輸同時用文字和顏色表示。
-- **Do** 在桌面與 768px 寬度檢查圖表、表格及按鈕。
-
-### Don't:
-
-- **Don't** 做成「充滿霓虹、閃爍報價與過度密集資訊的賭場式交易終端」。
-- **Don't** 做成「只有漂亮卡片卻沒有資料可追溯性的泛用 AI 儀表板」。
-- **Don't** 使用玻璃擬態、紫色漸層、漸層文字或裝飾性動畫。
-- **Don't** 把預測機率包裝成保證獲利。
-- **Don't** 使用超過 1px 的側邊彩色條作為卡片裝飾。
+- 不新增與核心研究流程無關的儀表板、聊天、推薦或社群功能。
+- 不改動 Pine 執行、標記資料、AI 規則搜尋或版本演算法。
+- 不以視覺改版為理由刪除使用者資料或既有能力。

@@ -1,46 +1,21 @@
-# Python environments and generated files
 .venv/
+.impeccable/
+*.egg-info/
 node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
 __pycache__/
 *.py[cod]
-*.egg-info/
 .pytest_cache/
 .ruff_cache/
-
-# Local secrets
-.env
-.env.*
-!.env.example
-.streamlit/secrets.toml
-
-# Local application database and runtime logs
-data/app.db*
-launcher.log
-*.log
-
-# Downloaded market data and local symbol catalog
-data/market/**/*.csv
-data/market/catalog/*.json
-
-# Labels, models and generated strategy records
+data/app.db
+data/market/*.csv
+data/market/catalog/
+data/market/history/
 data/samples/**/*.json.gz
-data/models/*
-data/strategy_versions/*
-
-# User Pine scripts
-indicators/*.pine
-
-# Local exports
-exports/*
-
-# Local design/agent working metadata
-.agents/
-.impeccable/
-
-# Keep empty runtime directories in the repository
+data/models/*.joblib
+data/models/*.json
+exports/*.csv
+exports/*.json
+launcher.log
 !data/**/.gitkeep
-!indicators/.gitkeep
-!exports/.gitkeep
-
-# Keep shared Streamlit configuration
-!.streamlit/config.toml

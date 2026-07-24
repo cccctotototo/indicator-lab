@@ -77,6 +77,51 @@ alertcondition(shortSignal)
     assert "and false" not in pine_text.lower()
 
 
+def test_generated_filter_is_inserted_after_late_signal_declarations(tmp_path, monkeypatch):
+    monkeypatch.setattr(improvement, "INDICATORS_DIR", tmp_path)
+    (tmp_path / "late_signals.pine").write_text(
+        """//@version=6
+indicator("Late signals", overlay=true)
+showEntry = input.bool(true)
+earlyCross = ta.crossover(close, open)
+alertcondition(earlyCross, title="一般提醒")
+var bool waitingLong = false
+var bool waitingShort = false
+longEntry = waitingLong and close > open
+shortEntry = waitingShort and close < open
+if longEntry
+    waitingLong := false
+if shortEntry
+    waitingShort := false
+plotshape(showEntry and longEntry, title="做多")
+plotshape(showEntry and shortEntry, title="做空")
+alertcondition(longEntry, title="做多進場")
+alertcondition(shortEntry, title="做空進場")
+""",
+        encoding="utf-8",
+    )
+
+    pine = improvement._write_pine(
+        "late_signals",
+        "late_signals_v2",
+        2,
+        [],
+        [],
+        "(longEntry) or (showEntry and longEntry)",
+        "(shortEntry) or (showEntry and shortEntry)",
+    )
+    pine_text = pine.read_text(encoding="utf-8")
+
+    assert pine_text.index("longEntry =") < pine_text.index("improvedLongSignal =")
+    assert pine_text.index("shortEntry =") < pine_text.index("improvedShortSignal =")
+    assert pine_text.index("improvedLongSignal =") < pine_text.index("plotshape(")
+    assert "alertcondition(earlyCross" in pine_text
+    assert 'plotshape(showEntry and improvedLongSignal, title="做多")' in pine_text
+    assert 'plotshape(showEntry and improvedShortSignal, title="做空")' in pine_text
+    assert 'alertcondition(improvedLongSignal, title="做多進場")' in pine_text
+    assert 'alertcondition(improvedShortSignal, title="做空進場")' in pine_text
+
+
 def test_direction_gain_is_kept_even_when_trade_mix_lowers_combined_rate(monkeypatch):
     data = _training_rows().iloc[:20].copy()
     data["direction"] = ["long"] * 10 + ["short"] * 10
