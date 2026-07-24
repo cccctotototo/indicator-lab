@@ -1,5 +1,6 @@
 # Python environments and generated files
 .venv/
+node_modules/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -26,10 +27,8 @@ data/samples/**/*.json.gz
 data/models/*
 data/strategy_versions/*
 
-# User Pine scripts and generated adapters
+# User Pine scripts
 indicators/*.pine
-adapters/*.py
-!adapters/_template.py
 
 # Local exports
 exports/*

@@ -6,7 +6,6 @@ from pathlib import Path
 import pandas as pd
 
 from .config import (
-    ADAPTERS_DIR,
     INDICATORS_DIR,
     MARKET_DIR,
     PROJECT_ROOT,
@@ -53,13 +52,11 @@ def _artifact_targets(
     targets: set[Path] = set()
     for name in names - preserve_shared:
         targets.add((INDICATORS_DIR / f"{name}.pine").resolve())
-        targets.add((ADAPTERS_DIR / f"{name}.py").resolve())
     for name in metadata_names:
         targets.add((STRATEGY_VERSIONS_DIR / f"{name}.json").resolve())
 
     allowed_roots = {
         INDICATORS_DIR.resolve(),
-        ADAPTERS_DIR.resolve(),
         STRATEGY_VERSIONS_DIR.resolve(),
     }
     for target in targets:
@@ -154,7 +151,6 @@ def delete_strategy(dataset_id: int, root_name: str) -> dict:
     if (
         root_name not in names
         and not (INDICATORS_DIR / f"{root_name}.pine").exists()
-        and not (ADAPTERS_DIR / f"{root_name}.py").exists()
     ):
         raise ValueError(f"找不到策略：{root_name}")
     names.add(root_name)

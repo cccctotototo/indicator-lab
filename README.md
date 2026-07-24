@@ -1,6 +1,6 @@
 # Indicator Lab
 
-Indicator Lab 是一套在使用者自己電腦上執行的繁體中文指標研究工具。它把 TradingView Pine 指標套用到歷史 K 線，讓使用者逐筆標記訊號為「贏、輸或無效」，再用數值規則比較贏單與輸單特徵，分別改善做多與做空條件並產生下一版 Pine。
+Indicator Lab 是一套在使用者自己電腦上執行的繁體中文指標研究工具。它透過本機 PineTS 把 TradingView Pine 指標套用到歷史 K 線，讓使用者逐筆標記訊號為「贏、輸或無效」，再用數值規則比較贏單與輸單特徵，分別改善做多與做空條件並產生下一版 Pine。
 
 > [!IMPORTANT]
 > 本專案是本機研究工具，不是雲端交易平台，也不會自動下單。GitHub 只保存程式碼；K 線、Pine 原碼、人工標記、模型和改善版本預設都不會上傳。
@@ -27,6 +27,7 @@ Indicator Lab 是一套在使用者自己電腦上執行的繁體中文指標研
 
 - Windows 10 或 Windows 11
 - Python 3.11 以上，建議 Python 3.12（64 位元）
+- Node.js 20 以上（供 PineTS 執行 Pine 指標）
 - 可連線至 Binance API 的網路
 - 現代瀏覽器，例如 Chrome、Edge 或 Firefox
 
@@ -34,9 +35,10 @@ Indicator Lab 是一套在使用者自己電腦上執行的繁體中文指標研
 
 ```powershell
 py --version
+node --version
 ```
 
-若沒有顯示 Python 版本，請先從 [Python 官方網站](https://www.python.org/downloads/windows/) 安裝 Python。安裝時請勾選 **Add Python to PATH**。
+若沒有顯示 Python 版本，請先從 [Python 官方網站](https://www.python.org/downloads/windows/) 安裝 Python。安裝時請勾選 **Add Python to PATH**。若沒有 Node.js，請先安裝 Node.js 20 以上版本。
 
 ## 下載專案
 
@@ -53,11 +55,9 @@ py --version
 ### 方法二：使用 Git
 
 ```powershell
-git clone https://github.com/你的帳號/indicator-lab.git
+git clone https://github.com/cccctotototo/indicator-lab.git
 cd indicator-lab
 ```
-
-請把網址中的 `你的帳號` 改成實際 GitHub 帳號。
 
 ## 第一次安裝
 
@@ -67,6 +67,7 @@ cd indicator-lab
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+npm.cmd install --ignore-scripts --no-audit --no-fund
 ```
 
 安裝完成後，專案內會出現 `.venv`。它只屬於目前這台電腦，不需要也不應上傳 GitHub。
@@ -101,47 +102,20 @@ http://localhost:8503
 
 1. 輸入策略名稱，建議只使用英文字母、數字和底線。
 2. 上傳 Pine 檔，或貼上完整 Pine 程式碼。
-3. 選擇建立訊號的方法。
-4. 選擇市場、交易對、K 線週期和顯示時區。
-5. 按「驗證策略並建立 V1」。
+3. 選擇市場、交易對、K 線週期和顯示時區。
+4. 按「驗證策略並建立 V1」。
 
 建立新的 Binance 研究市場時，系統會同步該交易對可取得的歷史行情並更新到現在。下載時間取決於週期、上市時間、網路速度與 Binance API 限制。
 
-#### 自動解析常用 Pine 語法
+#### PineTS 指標執行方式
 
-適用於一般指標條件。原始多空布林條件請命名為：
+系統不再使用自製 Python Pine 判斷器，也不需要 TradingView 訊號 CSV。Pine `indicator()` 會直接交給本機 PineTS 執行，再從下列位置辨識做多與做空：
 
-```pine
-longSignal = ...
-shortSignal = ...
-```
+1. 常見變數名稱，例如 `longSignal`／`shortSignal`、`buySignal`／`sellSignal`。
+2. `plotshape`、`plotchar` 或 `alertcondition` 的標題、文字與條件。
+3. 若指標使用特殊命名，可展開匯入頁的進階欄位，直接指定做多與做空變數或布林運算式。
 
-目前可處理常用價格運算、布林條件、三元運算、`math`、SMA、EMA、RSI、標準差、最高／最低與交叉等語法。
-
-#### 完整 Pine 相容模式
-
-Pine Script 是 TradingView 的專屬語言，本機 Python 無法完整重現所有狀態變數、迴圈、自訂函式、第三方函式庫或 `request.security` 行為。遇到這類腳本時：
-
-1. 在 TradingView 執行原始 Pine。
-2. 匯出真實訊號 CSV。
-3. 在 Indicator Lab 選擇「完整 Pine 相容（TradingView 訊號 CSV）」。
-4. 同時上傳 Pine 與訊號 CSV。
-
-CSV 可使用以下其中一種格式：
-
-```csv
-timestamp,direction
-2026-01-01T00:00:00Z,long
-2026-01-01T03:00:00Z,short
-```
-
-或：
-
-```csv
-timestamp,long_signal,short_signal
-2026-01-01T00:00:00Z,true,false
-2026-01-01T03:00:00Z,false,true
-```
+匯入器會先實際執行指標並確認訊號，成功後才保存 V1，不會留下半成品。目前只接受 `indicator()`；`strategy()` 的部位與券商模擬不屬於這個指標標記流程。同商品高週期 `request.security()` 可由本機 K 線聚合，跨商品呼叫則需要額外行情資料。
 
 ### 2. 標記訊號
 
@@ -182,9 +156,9 @@ timestamp,long_signal,short_signal
 3. 依時間先後切分前段與後段資料驗證。
 4. 只採用通過驗證的方向。
 5. 沒有進步的方向完整沿用上一版。
-6. 產生下一版 Pine、Python 適配器與新訊號。
+6. 產生下一版 Pine，並由 PineTS 重新計算新訊號。
 
-AI 改善是替原始 `longSignal`、`shortSignal` 增加過濾條件，不會憑空創造原本不存在的多空訊號。
+AI 改善只會替原始做多、做空訊號增加過濾條件，不會憑空創造原本不存在的多空訊號。
 
 ### 4. 檢查策略版本
 
@@ -231,7 +205,6 @@ AI 改善是替原始 `longSignal`、`shortSignal` 增加過濾條件，不會�
 | AI 模型與評估 | `data/models/` | 否 |
 | 改善版本資料 | `data/strategy_versions/` | 否 |
 | 使用者 Pine | `indicators/` | 否 |
-| 產生的 Python 適配器 | `adapters/` | 否，僅保留 `_template.py` |
 | 匯出檔 | `exports/` | 否 |
 
 上述規則由 `.gitignore` 保護。每次推送 GitHub 前仍應檢查變更清單，確認沒有私人 Pine、K 線、標記或帳號憑證。
@@ -261,18 +234,21 @@ py -3.12 -m venv .venv
 
 再開啟 `http://localhost:8504`。
 
-### Pine 可以在 TradingView 執行，但自動解析失敗
+### Pine 可以在 TradingView 執行，但 PineTS 執行失敗
 
-TradingView Pine 與 Python 不是同一個執行環境。改用「完整 Pine 相容（TradingView 訊號 CSV）」並匯入 TradingView 的真實訊號。
+PineTS 比原本的自製判斷器支援更多 Pine 語法，但不是 TradingView 私有引擎的完整複製。請先確認腳本使用 `indicator()`，並檢查是否依賴第三方函式庫、跨商品 `request.security()` 或 PineTS 尚未實作的功能。
 
 ### 建立 V1 後沒有訊號
 
 請檢查：
 
 - Pine 是否真的在相同交易對與週期產生訊號。
-- 自動解析模式是否存在 `longSignal` 與 `shortSignal`。
-- TradingView CSV 的時間、時區與方向欄位是否正確。
+- PineTS 是否辨識到真正的做多與做空條件；特殊命名可在匯入頁手動指定。
 - 指標參數是否與 TradingView 一致。
+
+### PineTS 授權
+
+PineTS 以 GNU AGPL v3 授權。固定版本與完整授權文字會在 `npm install` 後位於 `node_modules/pinets/`。公開或部署修改後的工具時，請一併遵守 PineTS 的 AGPL 授權條款。
 
 ### Binance 顯示 429 或下載變慢
 

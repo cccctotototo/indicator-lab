@@ -3,10 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .config import ADAPTERS_DIR
-from .indicators import run_adapter, signals_to_records
+from .config import INDICATORS_DIR
+from .indicators import signals_to_records
 from .labeling import save_label_snapshot
 from .market import load_saved_frame, save_market_frame
+from .pine_runtime import compute_pine_signals
 from .storage import add_dataset, get_dataset, list_datasets, list_signals, register_signals
 
 
@@ -45,10 +46,17 @@ def seed_demo() -> tuple[int, int, int]:
     path = save_market_frame(frame, "DEMOUSDT", "1h", "custom")
     enriched = load_saved_frame(path)
     dataset_id = add_dataset("DEMOUSDT", "1h", "custom", "Asia/Taipei", enriched, path, "demo:synthetic")
-    adapter = ADAPTERS_DIR / "candle_long_short_indicator.py"
-    output = run_adapter(enriched, adapter)
+    pine_path = INDICATORS_DIR / "candle_long_short_indicator.pine"
+    output = compute_pine_signals(
+        enriched,
+        pine_path.read_text(encoding="utf-8"),
+        ticker="DEMOUSDT",
+        timeframe="1h",
+        timezone="Asia/Taipei",
+    )
+    output.insert(0, "timestamp", pd.to_datetime(enriched["timestamp"], utc=True))
     records = signals_to_records(output)
-    register_signals(dataset_id, "candle_long_short_indicator", f"adapter:{adapter.name}", records)
+    register_signals(dataset_id, "candle_long_short_indicator", f"pinets:{pine_path.name}", records)
     extra = [
         {"timestamp": pd.Timestamp(enriched.iloc[index]["timestamp"]).isoformat(), "direction": "long" if n % 2 == 0 else "short"}
         for n, index in enumerate(range(100, min(len(enriched), 1700), 100))

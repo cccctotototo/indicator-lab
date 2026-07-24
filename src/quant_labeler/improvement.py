@@ -10,16 +10,15 @@ import numpy as np
 import pandas as pd
 
 from .config import (
-    ADAPTERS_DIR,
     INDICATORS_DIR,
     PROJECT_ROOT,
     SAMPLES_DIR,
     STRATEGY_VERSIONS_DIR,
 )
-from .features import add_features
-from .indicators import run_adapter, signals_to_records
+from .indicators import signals_to_records
 from .market import load_saved_frame
 from .ml import build_training_frame
+from .pine_runtime import compute_pine_signals
 from .storage import (
     delete_indicator_signals,
     get_dataset,
@@ -390,6 +389,8 @@ def _write_pine(
     version: int,
     long_rules: list[dict],
     short_rules: list[dict],
+    base_long_expression: str = "longSignal",
+    base_short_expression: str = "shortSignal",
 ) -> Path:
     source_path = INDICATORS_DIR / f"{root}.pine"
     if not source_path.exists():
@@ -422,12 +423,17 @@ def _write_pine(
 {prefix}ClosePosition = {prefix}Range != 0 ? (close - ta.lowest(low, 20)) / {prefix}Range : 0.5
 {prefix}LongFilter = {long_expression}
 {prefix}ShortFilter = {short_expression}
-improvedLongSignal = longSignal and {prefix}LongFilter
-improvedShortSignal = shortSignal and {prefix}ShortFilter
+improvedLongSignal = ({base_long_expression}) and {prefix}LongFilter
+improvedShortSignal = ({base_short_expression}) and {prefix}ShortFilter
 
 """
-    tail = re.sub(r"\blongSignal\b", "improvedLongSignal", tail)
-    tail = re.sub(r"\bshortSignal\b", "improvedShortSignal", tail)
+    def replace_condition(text: str, expression: str, replacement: str) -> str:
+        if re.fullmatch(r"[A-Za-z_]\w*", expression):
+            return re.sub(rf"\b{re.escape(expression)}\b", replacement, text)
+        return text.replace(expression, replacement)
+
+    tail = replace_condition(tail, base_long_expression, "improvedLongSignal")
+    tail = replace_condition(tail, base_short_expression, "improvedShortSignal")
     improved = head + block + tail
     improved = re.sub(
         r'(?P<kind>indicator|strategy)\("(?P<title>[^"]+)"',
@@ -438,77 +444,6 @@ improvedShortSignal = shortSignal and {prefix}ShortFilter
     target = INDICATORS_DIR / f"{child}.pine"
     target.write_text(improved, encoding="utf-8")
     return target
-
-
-def _python_rule_expression(rule: dict) -> str:
-    column = f'work["{rule["feature"]}"]'
-    if rule["op"] == "le":
-        return f"{column}.le({rule['value']!r})"
-    if rule["op"] == "ge":
-        return f"{column}.ge({rule['value']!r})"
-    return f"{column}.between({rule['low']!r}, {rule['high']!r}, inclusive=\"both\")"
-
-
-def _write_adapter(
-    root: str, child: str, long_rules: list[dict], short_rules: list[dict]
-) -> Path:
-    long_expression = " & ".join(
-        f"({_python_rule_expression(rule)})" for rule in long_rules
-    ) or "pd.Series(True, index=df.index)"
-    short_expression = " & ".join(
-        f"({_python_rule_expression(rule)})" for rule in short_rules
-    ) or "pd.Series(True, index=df.index)"
-    code = f'''"""AI-generated filter adapter. Parent logic: {root}.py"""
-from __future__ import annotations
-
-import importlib.util
-from pathlib import Path
-import pandas as pd
-from quant_labeler.features import add_features
-
-PARENT_PATH = Path(__file__).with_name("{root}.py")
-
-def _parent_module():
-    spec = importlib.util.spec_from_file_location("parent_{root}", PARENT_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
-    base = _parent_module().compute_signals(df.copy())
-    work = add_features(df) if not set({list(SUPPORTED_FEATURES)!r}).issubset(df.columns) else df.copy()
-    long_filter = ({long_expression}).fillna(False)
-    short_filter = ({short_expression}).fillna(False)
-    return pd.DataFrame({{
-        "long_signal": base["long_signal"] & long_filter,
-        "short_signal": base["short_signal"] & short_filter,
-    }}, index=df.index)
-'''
-    target = ADAPTERS_DIR / f"{child}.py"
-    target.write_text(code, encoding="utf-8")
-    return target
-
-
-def _filter_registered_records(
-    frame: pd.DataFrame,
-    signals: pd.DataFrame,
-    long_rules: list[dict],
-    short_rules: list[dict],
-) -> list[dict]:
-    """Filter imported TradingView records when no executable V1 adapter exists."""
-    feature_columns = [*SUPPORTED_FEATURES]
-    if not set(feature_columns).issubset(frame.columns):
-        frame = add_features(frame)
-    indexed = frame.set_index("timestamp")[feature_columns]
-    candidates = signals[["timestamp", "direction"]].join(indexed, on="timestamp")
-    keep = pd.Series(False, index=candidates.index)
-    for direction, rules in (("long", long_rules), ("short", short_rules)):
-        side = candidates["direction"].eq(direction)
-        keep |= side & _rule_mask(candidates, rules)
-    return [
-        {"timestamp": pd.Timestamp(row.timestamp).isoformat(), "direction": row.direction}
-        for row in candidates[keep].itertuples(index=False)
-    ]
 
 
 def improve_indicator(
@@ -549,23 +484,39 @@ def improve_indicator(
     short_rules = [*cumulative_short_rules, *selected["short"]["rules"]]
     version = _next_version(root)
     child = f"{root}_v{version}"
-    pine_path = _write_pine(root, child, version, long_rules, short_rules)
     dataset = get_dataset(dataset_id)
     frame = load_saved_frame(dataset["resolved_path"])
-    root_adapter = ADAPTERS_DIR / f"{root}.py"
-    if root_adapter.exists():
-        adapter_path = _write_adapter(root, child, long_rules, short_rules)
-        output = run_adapter(frame, adapter_path)
-        records = signals_to_records(output)
-    else:
-        adapter_path = None
-        records = _filter_registered_records(
-            frame,
-            signals,
-            selected["long"]["rules"],
-            selected["short"]["rules"],
-        )
-    added = register_signals(dataset_id, child, f"adapter:{adapter_path.name}", records)
+    root_source = (INDICATORS_DIR / f"{root}.pine").read_text(encoding="utf-8")
+    root_output = compute_pine_signals(
+        frame,
+        root_source,
+        ticker=str(dataset.get("symbol") or "LOCAL"),
+        timeframe=str(dataset.get("interval") or "15m"),
+        timezone=str(dataset.get("timezone") or "UTC"),
+    )
+    base_long_expression = str(root_output.attrs.get("long_expression") or "longSignal")
+    base_short_expression = str(root_output.attrs.get("short_expression") or "shortSignal")
+    pine_path = _write_pine(
+        root,
+        child,
+        version,
+        long_rules,
+        short_rules,
+        base_long_expression,
+        base_short_expression,
+    )
+    output = compute_pine_signals(
+        frame,
+        pine_path.read_text(encoding="utf-8"),
+        ticker=str(dataset.get("symbol") or "LOCAL"),
+        timeframe=str(dataset.get("interval") or "15m"),
+        timezone=str(dataset.get("timezone") or "UTC"),
+        long_expression="improvedLongSignal",
+        short_expression="improvedShortSignal",
+    )
+    output.insert(0, "timestamp", pd.to_datetime(frame["timestamp"], utc=True))
+    records = signals_to_records(output)
+    added = register_signals(dataset_id, child, f"pinets:{pine_path.name}", records)
     direction_counts = {
         direction: sum(record["direction"] == direction for record in records)
         for direction in ("long", "short")
@@ -596,7 +547,7 @@ def improve_indicator(
         "signals_added": added,
         "direction_counts": direction_counts,
         "pine_path": str(pine_path),
-        "adapter_path": str(adapter_path) if adapter_path else None,
+        "engine": "PineTS",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     STRATEGY_VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -644,12 +595,10 @@ def delete_improvement_version(dataset_id: int, indicator_name: str) -> dict:
 
     generated_targets = [
         (INDICATORS_DIR / f"{indicator_name}.pine").resolve(),
-        (ADAPTERS_DIR / f"{indicator_name}.py").resolve(),
         (STRATEGY_VERSIONS_DIR / f"{indicator_name}.json").resolve(),
     ]
     allowed_roots = {
         INDICATORS_DIR.resolve(),
-        ADAPTERS_DIR.resolve(),
         STRATEGY_VERSIONS_DIR.resolve(),
     }
     for target in generated_targets:

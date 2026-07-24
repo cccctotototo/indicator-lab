@@ -23,6 +23,32 @@ try {
     if (-not (Test-Path -LiteralPath $appPath)) {
         throw "Application file is missing: $appPath"
     }
+    $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    if ($null -eq $nodeCommand) {
+        throw "Node.js 20 or newer is required for the PineTS indicator engine."
+    }
+    $nodeMajor = [int]((& $nodeCommand.Source --version).TrimStart("v").Split(".")[0])
+    if ($nodeMajor -lt 20) {
+        throw "Node.js 20 or newer is required. Current version: $(& $nodeCommand.Source --version)"
+    }
+    $pineTsPackage = Join-Path $workspaceRoot "node_modules\pinets\package.json"
+    if (-not (Test-Path -LiteralPath $pineTsPackage)) {
+        $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+        if ($null -eq $npmCommand) {
+            throw "npm.cmd is missing; PineTS could not be installed."
+        }
+        Write-LauncherLog "Installing PineTS dependencies."
+        Push-Location -LiteralPath $workspaceRoot
+        try {
+            & $npmCommand.Source install --ignore-scripts --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) {
+                throw "PineTS dependency installation failed with code $LASTEXITCODE."
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
 
     $ready = $false
     $streamlitProcess = $null

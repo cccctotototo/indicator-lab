@@ -594,32 +594,23 @@ if navigation == PAGE_IMPORT:
             key="import_pine_text",
         )
     with setup_column:
-        signal_method = st.radio(
-            "建立 V1 訊號的方法",
-            ["自動解析常用 Pine 語法", "完整 Pine 相容（TradingView 訊號 CSV）"],
-            help=(
-                "自動解析適合可直接計算的指標；完整相容模式不解析 Pine，"
-                "因此可保留任意 Pine 語法，訊號以 TradingView 匯出的 CSV 為準。"
-            ),
-            key="import_signal_method",
+        st.markdown("**Pine 執行引擎**")
+        st.success("PineTS · 本機直接執行指標")
+        st.caption(
+            "系統會從 longSignal／shortSignal、買賣提示與 plotshape 自動辨識做多和做空。"
         )
-        if signal_method == "自動解析常用 Pine 語法":
-            st.info(
-                "支援常用價格運算、三元條件、math、SMA／EMA／RSI／標準差、"
-                "最高最低與交叉；原始條件請命名為 longSignal、shortSignal。"
+        with st.expander("訊號名稱辨識不到時才需要填寫"):
+            import_long_expression = st.text_input(
+                "做多條件名稱或運算式",
+                placeholder="例如 buySignal",
+                key="import_long_expression",
             )
-            signal_upload = None
-        else:
-            signal_upload = st.file_uploader(
-                "TradingView 訊號 CSV",
-                type=["csv"],
-                help="需要 timestamp、direction（long／short），或 timestamp、long_signal、short_signal。",
-                key="import_signal_csv",
+            import_short_expression = st.text_input(
+                "做空條件名稱或運算式",
+                placeholder="例如 sellSignal",
+                key="import_short_expression",
             )
-            st.caption(
-                "此模式接受包含狀態變數、迴圈、自訂函式、request.security或第三方函式庫的 Pine；"
-                f"仍可完成「{PAGE_LABEL}」、「{PAGE_IMPROVE}」並產生新版 Pine。"
-            )
+            st.caption("一般指標請留空；只有自動辨識方向失敗時才需要指定。")
 
     st.divider()
     st.subheader("市場與研究範圍")
@@ -690,9 +681,7 @@ if navigation == PAGE_IMPORT:
                 else pine_paste
             )
             normalized_name = normalize_strategy_name(strategy_name_input)
-            if signal_method == "完整 Pine 相容（TradingView 訊號 CSV）" and signal_upload is None:
-                raise ValueError("請先上傳 TradingView 訊號 CSV。")
-            with st.spinner("正在同步全部歷史行情、驗證 Pine 並建立 V1 訊號…"):
+            with st.spinner("正在同步全部歷史行情，並用 PineTS 執行指標…"):
                 if market_source == "使用左側目前市場":
                     target_dataset_id = int(dataset_id)
                     current_dataset = get_dataset(target_dataset_id)
@@ -735,7 +724,8 @@ if navigation == PAGE_IMPORT:
                     target_frame,
                     normalized_name,
                     pine_source_text,
-                    signal_csv=signal_upload if signal_method != "自動解析 Pine" else None,
+                    long_expression=import_long_expression or None,
+                    short_expression=import_short_expression or None,
                 )
             st.session_state.strategy_import_result = result
             st.session_state.pending_strategy_selection = {

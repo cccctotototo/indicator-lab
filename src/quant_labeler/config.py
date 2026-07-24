@@ -10,7 +10,6 @@ MODELS_DIR = DATA_DIR / "models"
 STRATEGY_VERSIONS_DIR = DATA_DIR / "strategy_versions"
 EXPORTS_DIR = PROJECT_ROOT / "exports"
 INDICATORS_DIR = PROJECT_ROOT / "indicators"
-ADAPTERS_DIR = PROJECT_ROOT / "adapters"
 DB_PATH = DATA_DIR / "app.db"
 
 LABELS = ("win", "loss", "breakeven", "invalid")
@@ -25,7 +24,6 @@ def ensure_directories() -> None:
         STRATEGY_VERSIONS_DIR,
         EXPORTS_DIR,
         INDICATORS_DIR,
-        ADAPTERS_DIR,
         *(SAMPLES_DIR / label for label in LABELS),
     ):
         path.mkdir(parents=True, exist_ok=True)

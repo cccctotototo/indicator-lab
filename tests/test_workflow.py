@@ -20,7 +20,6 @@ def test_end_to_end_label_snapshot_and_semisupervised_model(tmp_path, monkeypatc
     models_dir = data_dir / "models"
     exports_dir = tmp_path / "exports"
     indicators_dir = tmp_path / "indicators"
-    adapters_dir = tmp_path / "adapters"
     patches = {
         "PROJECT_ROOT": tmp_path,
         "DATA_DIR": data_dir,
@@ -29,7 +28,6 @@ def test_end_to_end_label_snapshot_and_semisupervised_model(tmp_path, monkeypatc
         "MODELS_DIR": models_dir,
         "EXPORTS_DIR": exports_dir,
         "INDICATORS_DIR": indicators_dir,
-        "ADAPTERS_DIR": adapters_dir,
         "DB_PATH": data_dir / "app.db",
     }
     for name, value in patches.items():

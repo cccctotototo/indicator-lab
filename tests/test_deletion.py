@@ -15,7 +15,6 @@ def _prepare_workspace(tmp_path: Path, monkeypatch) -> dict[str, Path]:
         "samples": data / "samples",
         "versions": data / "strategy_versions",
         "indicators": tmp_path / "indicators",
-        "adapters": tmp_path / "adapters",
     }
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
@@ -28,7 +27,6 @@ def _prepare_workspace(tmp_path: Path, monkeypatch) -> dict[str, Path]:
     monkeypatch.setattr(deletion, "SAMPLES_DIR", paths["samples"])
     monkeypatch.setattr(deletion, "STRATEGY_VERSIONS_DIR", paths["versions"])
     monkeypatch.setattr(deletion, "INDICATORS_DIR", paths["indicators"])
-    monkeypatch.setattr(deletion, "ADAPTERS_DIR", paths["adapters"])
     monkeypatch.setattr(improvement, "STRATEGY_VERSIONS_DIR", paths["versions"])
     storage.initialize_database()
     return paths
@@ -69,7 +67,6 @@ def _add_strategy(paths: dict[str, Path], dataset_id: int) -> None:
     ]
     for index, (name, parent, version) in enumerate(versions):
         (paths["indicators"] / f"{name}.pine").write_text(name, encoding="utf-8")
-        (paths["adapters"] / f"{name}.py").write_text(name, encoding="utf-8")
         storage.register_signals(
             dataset_id,
             name,

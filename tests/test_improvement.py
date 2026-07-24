@@ -54,7 +54,6 @@ def test_directional_filters_train_long_and_short_without_disabling_either():
 
 def test_generated_versions_preserve_both_original_signal_conditions(tmp_path, monkeypatch):
     monkeypatch.setattr(improvement, "INDICATORS_DIR", tmp_path)
-    monkeypatch.setattr(improvement, "ADAPTERS_DIR", tmp_path)
     (tmp_path / "parent.pine").write_text(
         """//@version=6
 indicator("Parent", overlay=true)
@@ -71,15 +70,11 @@ alertcondition(shortSignal)
     short_rules = [{"feature": "rsi_14", "op": "ge", "value": 40.0}]
 
     pine = improvement._write_pine("parent", "parent_v2", 2, long_rules, short_rules)
-    adapter = improvement._write_adapter("parent", "parent_v2", long_rules, short_rules)
     pine_text = pine.read_text(encoding="utf-8")
-    adapter_text = adapter.read_text(encoding="utf-8")
 
-    assert "improvedLongSignal = longSignal and aiV2LongFilter" in pine_text
-    assert "improvedShortSignal = shortSignal and aiV2ShortFilter" in pine_text
+    assert "improvedLongSignal = (longSignal) and aiV2LongFilter" in pine_text
+    assert "improvedShortSignal = (shortSignal) and aiV2ShortFilter" in pine_text
     assert "and false" not in pine_text.lower()
-    assert 'base["long_signal"] & long_filter' in adapter_text
-    assert 'base["short_signal"] & short_filter' in adapter_text
 
 
 def test_direction_gain_is_kept_even_when_trade_mix_lowers_combined_rate(monkeypatch):
@@ -211,14 +206,12 @@ def test_single_win_produces_analysis_and_feature_profile(monkeypatch):
 
 def test_generated_version_delete_is_scoped_and_removes_its_artifacts(tmp_path, monkeypatch):
     indicators = tmp_path / "indicators"
-    adapters = tmp_path / "adapters"
     versions = tmp_path / "data" / "strategy_versions"
     samples = tmp_path / "data" / "samples"
-    for folder in (indicators, adapters, versions, samples / "win"):
+    for folder in (indicators, versions, samples / "win"):
         folder.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(improvement, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(improvement, "INDICATORS_DIR", indicators)
-    monkeypatch.setattr(improvement, "ADAPTERS_DIR", adapters)
     monkeypatch.setattr(improvement, "STRATEGY_VERSIONS_DIR", versions)
     monkeypatch.setattr(improvement, "SAMPLES_DIR", samples)
 
@@ -233,7 +226,6 @@ def test_generated_version_delete_is_scoped_and_removes_its_artifacts(tmp_path, 
     }
     (versions / f"{child}.json").write_text(json.dumps(metadata), encoding="utf-8")
     (indicators / f"{child}.pine").write_text("pine", encoding="utf-8")
-    (adapters / f"{child}.py").write_text("python", encoding="utf-8")
     sample = samples / "win" / "signal.json.gz"
     sample.write_text("sample", encoding="utf-8")
     monkeypatch.setattr(
@@ -254,5 +246,4 @@ def test_generated_version_delete_is_scoped_and_removes_its_artifacts(tmp_path, 
     assert deleted == [(7, child)]
     assert not sample.exists()
     assert not (indicators / f"{child}.pine").exists()
-    assert not (adapters / f"{child}.py").exists()
     assert not (versions / f"{child}.json").exists()
