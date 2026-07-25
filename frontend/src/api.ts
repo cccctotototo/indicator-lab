@@ -76,13 +76,21 @@ function versionsPath(datasetId: number, root: string) {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (reason) {
+    throw new Error(
+      "無法連線本機服務。請確認 Indicator Lab 仍在執行，然後重新整理頁面。",
+      { cause: reason },
+    );
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: response.statusText }));
     throw new Error(body.detail || "操作失敗，請稍後再試。");
@@ -135,7 +143,15 @@ export const api = {
   peekVersions: (datasetId: number, root: string) =>
     readCache<{ versions: StrategySummary[] }>(versionsPath(datasetId, root)),
   pine: async (indicator: string) => {
-    const response = await fetch(`${API}/strategies/${encodeURIComponent(indicator)}/pine`);
+    let response: Response;
+    try {
+      response = await fetch(`${API}/strategies/${encodeURIComponent(indicator)}/pine`);
+    } catch (reason) {
+      throw new Error(
+        "無法連線本機服務。請確認 Indicator Lab 仍在執行後再試。",
+        { cause: reason },
+      );
+    }
     if (!response.ok) throw new Error("找不到 Pine 原始碼。");
     return response.text();
   },

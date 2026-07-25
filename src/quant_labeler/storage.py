@@ -309,6 +309,23 @@ def list_signals(dataset_id: int | None = None, indicator_name: str | None = Non
     return frame
 
 
+def list_review_signals(dataset_id: int, indicator_name: str) -> pd.DataFrame:
+    """Load only the fields needed by the interactive labeling screen."""
+    query = """
+    SELECT s.id, s.timestamp, s.direction, s.indicator_name,
+           l.label, l.notes, l.pnl_pct, l.bars_held
+    FROM signals s
+    LEFT JOIN labels l ON l.signal_id=s.id
+    WHERE s.dataset_id=? AND s.indicator_name=?
+    ORDER BY s.timestamp, s.id
+    """
+    with connect() as conn:
+        frame = pd.read_sql_query(query, conn, params=[dataset_id, indicator_name])
+    if not frame.empty:
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
+    return frame
+
+
 def get_signal(signal_id: int) -> dict:
     with connect() as conn:
         row = conn.execute(

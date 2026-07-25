@@ -42,6 +42,11 @@ export interface Signal {
   indicator_name: string;
 }
 
+export interface SignalReference {
+  id: number;
+  label: Label;
+}
+
 export interface Candle {
   timestamp: string;
   open: number;
@@ -64,7 +69,7 @@ export interface ReviewData {
     selected_position: number;
   };
   selected: Signal;
-  signals: Signal[];
+  signals: SignalReference[];
   visible_signals: Signal[];
   candles: Candle[];
 }

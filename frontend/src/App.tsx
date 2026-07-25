@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   BarChart3,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clipboard,
@@ -98,6 +99,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceMessage, setWorkspaceMessage] = useState("");
+  const workspaceBusyRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const topbarRef = useRef<HTMLElement>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -143,8 +147,33 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  const navigatePage = useCallback((target: Page, replace = false) => {
+    const nextHash = `#${target}`;
+    if (window.location.hash !== nextHash) {
+      if (replace) window.history.replaceState(null, "", nextHash);
+      else window.history.pushState(null, "", nextHash);
+    }
+    setPage(target);
+  }, []);
+
   useEffect(() => {
-    window.history.replaceState(null, "", `#${page}`);
+    if (!["#import", "#label", "#analysis", "#versions"].includes(window.location.hash)) {
+      navigatePage(page, true);
+    }
+    const syncFromHistory = () => setPage(readPageFromHash());
+    window.addEventListener("popstate", syncFromHistory);
+    window.addEventListener("hashchange", syncFromHistory);
+    return () => {
+      window.removeEventListener("popstate", syncFromHistory);
+      window.removeEventListener("hashchange", syncFromHistory);
+    };
+  }, [navigatePage, page]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      mainRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [page]);
 
   useEffect(() => {
@@ -158,6 +187,7 @@ export default function App() {
       frame = 0;
       const shellWidth = Math.round(shell.getBoundingClientRect().width);
       if (sidebarOpenRef.current) {
+        const minimumComfortableCanvas = 720;
         const layoutContainers = [
           topbar,
           ...main.querySelectorAll<HTMLElement>(
@@ -191,9 +221,10 @@ export default function App() {
               document.documentElement.clientWidth,
           ),
         );
-        if (overflow > 2) {
+        const narrowBy = Math.max(0, minimumComfortableCanvas - main.clientWidth);
+        if (overflow > 2 || narrowBy > 0) {
           autoCollapsedRef.current = true;
-          reopenWidthRef.current = shellWidth + overflow + 24;
+          reopenWidthRef.current = shellWidth + Math.max(overflow, narrowBy) + 24;
           sidebarOpenRef.current = false;
           setSidebarOpen(false);
         }
@@ -221,10 +252,14 @@ export default function App() {
       subtree: true,
       characterData: true,
     });
+    const settleTimers = [80, 320, 800].map((delay) =>
+      window.setTimeout(measureFit, delay),
+    );
     window.addEventListener("resize", scheduleFitCheck, { passive: true });
     scheduleFitCheck();
 
     return () => {
+      settleTimers.forEach((timer) => window.clearTimeout(timer));
       window.cancelAnimationFrame(frame);
       sizeObserver.disconnect();
       contentObserver.disconnect();
@@ -275,6 +310,54 @@ export default function App() {
       return next;
     });
   };
+  const removeCurrentStrategy = async () => {
+    if (!activeDataset || !activeStrategy || workspaceBusyRef.current) return;
+    const confirmed = window.confirm(
+      `確定刪除「${activeStrategy.root}」的所有版本、訊號與標記嗎？此動作無法復原。`,
+    );
+    if (!confirmed) return;
+    workspaceBusyRef.current = true;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage("");
+    try {
+      await api.removeStrategy(activeDataset.id, activeStrategy.root);
+      await refreshWorkspace();
+      setToast(`已刪除策略 ${activeStrategy.root}`);
+    } catch (reason) {
+      setWorkspaceMessage(
+        reason instanceof Error ? reason.message : "策略刪除失敗，請重新整理後再試。",
+      );
+    } finally {
+      workspaceBusyRef.current = false;
+      setWorkspaceBusy(false);
+    }
+  };
+  const removeCurrentDataset = async () => {
+    if (!activeDataset || workspaceBusyRef.current) return;
+    const marketName = `${activeDataset.symbol} · ${activeDataset.interval}`;
+    const confirmed = window.confirm(
+      `確定刪除「${marketName}」行情、其中所有策略、訊號與標記嗎？此動作無法復原。`,
+    );
+    if (!confirmed) return;
+    workspaceBusyRef.current = true;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage("");
+    try {
+      await api.removeDataset(activeDataset.id);
+      setDatasetId(null);
+      setIndicator("");
+      localStorage.removeItem("indicator-lab.indicator");
+      await refreshWorkspace();
+      setToast(`已刪除市場 ${marketName}`);
+    } catch (reason) {
+      setWorkspaceMessage(
+        reason instanceof Error ? reason.message : "市場刪除失敗，請重新整理後再試。",
+      );
+    } finally {
+      workspaceBusyRef.current = false;
+      setWorkspaceBusy(false);
+    }
+  };
 
   return (
     <div
@@ -307,7 +390,7 @@ export default function App() {
               <button
                 key={item.id}
                 className={`nav-item ${page === item.id ? "active" : ""}`}
-                onClick={() => setPage(item.id)}
+                onClick={() => navigatePage(item.id)}
                 onPointerEnter={() => warmPage(item.id)}
                 onFocus={() => warmPage(item.id)}
                 aria-current={page === item.id ? "step" : undefined}
@@ -365,22 +448,51 @@ export default function App() {
               </span>
             </div>
           )}
+          <details className="workspace-management">
+            <summary>
+              <span>管理資料</span>
+              <ChevronDown size={15} aria-hidden="true" />
+            </summary>
+            <div className="workspace-management-actions">
+              <button
+                type="button"
+                onClick={() => void removeCurrentStrategy()}
+                disabled={!activeStrategy || workspaceBusy}
+              >
+                <Trash2 size={15} aria-hidden="true" />
+                刪除目前策略
+              </button>
+              <button
+                type="button"
+                onClick={() => void removeCurrentDataset()}
+                disabled={!activeDataset || workspaceBusy}
+              >
+                <Database size={15} aria-hidden="true" />
+                刪除市場與 K 線
+              </button>
+            </div>
+            {workspaceMessage && (
+              <p className="sidebar-error" role="alert">{workspaceMessage}</p>
+            )}
+          </details>
         </div>
       </aside>
 
       <header ref={topbarRef} className="topbar">
-        <div className="topbar-page">
-          <span>步驟 {NAV.findIndex((item) => item.id === page) + 1}／4</span>
-          <strong>{NAV.find((item) => item.id === page)?.label}</strong>
-        </div>
-        <span className="topbar-divider" aria-hidden="true" />
-        <div className="context-title">
-          <span>{activeDataset ? `${activeDataset.symbol} · ${activeDataset.interval}` : "尚未建立市場"}</span>
-          <small>{indicator || "請先匯入策略"}</small>
-        </div>
-        <div className="topbar-status">
-          <span className="status-dot" aria-hidden="true" />
-          <span className="topbar-status-label">本機工作區</span>
+        <div className="topbar-inner">
+          <div className="topbar-page">
+            <span>步驟 {NAV.findIndex((item) => item.id === page) + 1}／4</span>
+            <strong>{NAV.find((item) => item.id === page)?.label}</strong>
+          </div>
+          <span className="topbar-divider" aria-hidden="true" />
+          <div className="context-title">
+            <span>{activeDataset ? `${activeDataset.symbol} · ${activeDataset.interval}` : "尚未建立市場"}</span>
+            <small>{indicator || "請先匯入策略"}</small>
+          </div>
+          <div className="topbar-status">
+            <span className="status-dot" aria-hidden="true" />
+            <span className="topbar-status-label">本機工作區</span>
+          </div>
         </div>
       </header>
 
@@ -394,14 +506,14 @@ export default function App() {
             await refreshWorkspace();
             setIndicator(name);
             localStorage.setItem("indicator-lab.indicator", name);
-            setPage("label");
+            navigatePage("label");
             setToast("策略已匯入，開始標記訊號。");
           }} />
         ) : !activeDataset || !activeStrategy ? (
           <EmptyState
             title="先建立第一個策略"
             description="匯入 Pine 指標後，系統會用 PineTS 產生可標記訊號。"
-            action={() => setPage("import")}
+            action={() => navigatePage("import")}
             actionLabel="前往匯入策略"
           />
         ) : page === "label" ? (
@@ -411,7 +523,6 @@ export default function App() {
             strategy={activeStrategy}
             onSaved={(message) => {
               setToast(message);
-              void refreshWorkspace();
             }}
           />
         ) : page === "analysis" ? (
@@ -424,7 +535,7 @@ export default function App() {
               setIndicator(name);
               localStorage.setItem("indicator-lab.indicator", name);
               setToast(`已建立 ${name}`);
-              setPage("versions");
+              navigatePage("versions");
             }}
           />
         ) : (
@@ -432,7 +543,10 @@ export default function App() {
             key={`${activeDataset.id}:${activeStrategy.root}`}
             dataset={activeDataset}
             strategy={activeStrategy}
-            onSelect={selectIndicator}
+            onUse={(name) => {
+              selectIndicator(name);
+              navigatePage("label");
+            }}
             onDeleted={async () => {
               await refreshWorkspace();
               setToast("版本已刪除。");
@@ -440,7 +554,11 @@ export default function App() {
           />
         )}
       </main>
-      {toast && <div className="toast"><Check size={17} />{toast}</div>}
+      {toast && (
+        <div className="toast" role="status" aria-live="polite">
+          <Check size={17} aria-hidden="true" />{toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -450,21 +568,36 @@ function LoadingState({
 }: {
   variant?: "workspace" | "import" | "label" | "analysis" | "versions";
 }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setVisible(true), 300);
+    return () => window.clearTimeout(timer);
+  }, []);
   return (
-    <div className={`page loading-buffer loading-${variant}`} aria-busy="true" aria-label="內容載入中">
-      <div className="loading-progress" />
-      <div className="loading-heading">
-        <span className="skeleton-line short" />
-        <span className="skeleton-line title" />
-        <span className="skeleton-line copy" />
-      </div>
-      <div className="loading-metrics" aria-hidden="true">
-        {[0, 1, 2, 3].map((item) => <span key={item} />)}
-      </div>
-      <div className="loading-content" aria-hidden="true">
-        <span />
-        <span />
-      </div>
+    <div
+      className={`page loading-buffer loading-${variant} ${visible ? "is-visible" : "is-pending"}`}
+      aria-busy="true"
+      aria-live="polite"
+      role="status"
+    >
+      <span className="sr-only">內容載入中</span>
+      {visible && (
+        <>
+          <div className="loading-progress" aria-hidden="true" />
+          <div className="loading-heading" aria-hidden="true">
+            <span className="skeleton-line short" />
+            <span className="skeleton-line title" />
+            <span className="skeleton-line copy" />
+          </div>
+          <div className="loading-metrics" aria-hidden="true">
+            {[0, 1, 2, 3].map((item) => <span key={item} />)}
+          </div>
+          <div className="loading-content" aria-hidden="true">
+            <span />
+            <span />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -509,12 +642,29 @@ function EmptyState({
   action: () => void | Promise<void>;
   actionLabel?: string;
 }) {
+  const [working, setWorking] = useState(false);
+  const runAction = async () => {
+    if (working) return;
+    setWorking(true);
+    try {
+      await action();
+    } finally {
+      setWorking(false);
+    }
+  };
   return (
     <section className="empty-state">
-      <FlaskConical size={30} />
+      <FlaskConical size={30} aria-hidden="true" />
       <h1>{title}</h1>
       <p>{description}</p>
-      <button className="button primary" onClick={() => void action()}>{actionLabel}</button>
+      <button
+        className="button primary"
+        onClick={() => void runAction()}
+        disabled={working}
+      >
+        {working && <LoaderCircle className="spin" size={17} aria-hidden="true" />}
+        {working ? "處理中…" : actionLabel}
+      </button>
     </section>
   );
 }
@@ -557,9 +707,14 @@ function LabelPage({
   const [message, setMessage] = useState("");
   const [notes, setNotes] = useState(initialReview?.selected.notes ?? "");
   const [barsHeld, setBarsHeld] = useState(initialReview?.selected.bars_held ?? 20);
+  const busyRef = useRef(busy);
   const prefetchedReviews = useRef(new Map<number, Promise<ReviewData>>());
   const readyReviews = useRef(new Map<number, ReviewData>());
   const loadSequence = useRef(0);
+  const updateBusy = useCallback((value: boolean) => {
+    busyRef.current = value;
+    setBusy(value);
+  }, []);
 
   const queueNextReview = useCallback((result: ReviewData) => {
     const currentIndex = result.signals.findIndex(
@@ -591,7 +746,7 @@ function LabelPage({
 
   const load = useCallback(async (signalId?: number) => {
     const sequence = ++loadSequence.current;
-    if (!api.peekReview(dataset.id, strategy.name, signalId)) setBusy(true);
+    if (!api.peekReview(dataset.id, strategy.name, signalId)) updateBusy(true);
     try {
       const prefetched = signalId ? prefetchedReviews.current.get(signalId) : undefined;
       const result = await (
@@ -606,9 +761,9 @@ function LabelPage({
       if (sequence !== loadSequence.current) return;
       setMessage(reason instanceof Error ? reason.message : "無法載入訊號。");
     } finally {
-      if (sequence === loadSequence.current) setBusy(false);
+      if (sequence === loadSequence.current) updateBusy(false);
     }
-  }, [applyReview, dataset.id, strategy.name]);
+  }, [applyReview, dataset.id, strategy.name, updateBusy]);
 
   useEffect(() => {
     prefetchedReviews.current.clear();
@@ -630,12 +785,12 @@ function LabelPage({
     if (next) void load(next.id);
   };
   const save = async (label: Exclude<Label, null>) => {
-    if (!review) return;
+    if (!review || busyRef.current) return;
     loadSequence.current += 1;
     const previousReview = review;
     let advancedOptimistically = false;
     let appliedReview: ReviewData | null = null;
-    setBusy(true);
+    updateBusy(true);
     try {
       const next =
         review.signals.slice(selectedIndex + 1).find((signal) => signal.label === null) ??
@@ -682,32 +837,37 @@ function LabelPage({
       if (readyReview) {
         advance(readyReview);
         advancedOptimistically = true;
-        await labelRequest;
-      } else {
-        const [, nextReview] = await Promise.all([labelRequest, nextReviewRequest]);
-        advance(nextReview);
+      }
+      await labelRequest;
+      if (!readyReview) {
+        try {
+          advance(await nextReviewRequest);
+        } catch {
+          advance(previousReview);
+          setMessage("標記已儲存，但下一筆載入失敗；請按「下一筆」重試。");
+        }
       }
       prefetchedReviews.current.delete(next.id);
       readyReviews.current.delete(next.id);
       if (appliedReview) api.primeReview(dataset.id, strategy.name, appliedReview);
       onSaved(`已標記為${labelName[label]}`);
-      setBusy(false);
+      updateBusy(false);
     } catch (reason) {
       if (advancedOptimistically) applyReview(previousReview);
       setMessage(reason instanceof Error ? reason.message : "標記儲存失敗。");
-      setBusy(false);
+      updateBusy(false);
     }
   };
   const undo = async () => {
-    if (!review) return;
-    setBusy(true);
+    if (!review || busyRef.current) return;
+    updateBusy(true);
     try {
       await api.undoLabel(review.selected.id);
       onSaved("已清除這筆標記");
       await load(review.selected.id);
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "無法清除標記。");
-      setBusy(false);
+      updateBusy(false);
     }
   };
 
@@ -752,7 +912,15 @@ function LabelPage({
       />
       <section className={`review-strip workspace-edge ${busy ? "is-loading" : ""}`} aria-busy={busy}>
         {busy && <span className="panel-loading-bar" aria-hidden="true" />}
-        <div className="progress-line">
+        <div
+          className="progress-line"
+          role="progressbar"
+          aria-label="標記進度"
+          aria-valuemin={0}
+          aria-valuemax={review.summary.total}
+          aria-valuenow={review.summary.labeled}
+          aria-valuetext={`已標記 ${review.summary.labeled}／${review.summary.total}`}
+        >
           <span>
             已標記 {review.summary.labeled.toLocaleString()}／{review.summary.total.toLocaleString()}
           </span>
@@ -782,9 +950,9 @@ function LabelPage({
         </div>
       </section>
 
-      <section className="chart-panel workspace-edge">
+      <section className="chart-panel workspace-edge" aria-labelledby="chart-section-title">
         <div className="chart-toolbar">
-          <div className="legend">
+          <div className="legend" id="chart-section-title">
             <span><i className="marker gray" />未標記</span>
             <span><i className="marker green" />盈利</span>
             <span><i className="marker red" />虧損</span>
@@ -804,20 +972,45 @@ function LabelPage({
 
       <section className="label-dock workspace-edge">
         <div className="label-controls">
-          <button className="label-button win" onClick={() => void save("win")} disabled={busy}>
+          <button
+            className="label-button win"
+            onClick={() => void save("win")}
+            disabled={busy}
+            aria-keyshortcuts="W"
+          >
             <Check size={20} /><span><strong>盈利</strong><small>這筆訊號有效獲利</small></span><kbd>W</kbd>
           </button>
-          <button className="label-button loss" onClick={() => void save("loss")} disabled={busy}>
+          <button
+            className="label-button loss"
+            onClick={() => void save("loss")}
+            disabled={busy}
+            aria-keyshortcuts="L"
+          >
             <X size={20} /><span><strong>虧損</strong><small>這筆訊號造成虧損</small></span><kbd>L</kbd>
           </button>
-          <button className="label-button invalid" onClick={() => void save("invalid")} disabled={busy}>
+          <button
+            className="label-button invalid"
+            onClick={() => void save("invalid")}
+            disabled={busy}
+            aria-keyshortcuts="I"
+          >
             <Menu size={19} /><span><strong>無效</strong><small>不納入 AI 贏輸分析</small></span><kbd>I</kbd>
           </button>
         </div>
         <details className="advanced-settings">
           <summary><span><SlidersHorizontal size={16} />進階標記設定</span><small>持有 K 棒、備註與清除標記</small></summary>
           <div className="label-details">
-            <label>持有 K 棒<input type="number" min={1} value={barsHeld} onChange={(e) => setBarsHeld(Number(e.target.value))} /></label>
+            <label>
+              持有 K 棒
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={5000}
+                value={barsHeld}
+                onChange={(e) => setBarsHeld(Number(e.target.value))}
+              />
+            </label>
             <label className="notes-field">備註<input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="選填：記下你的判斷" /></label>
             <button className="button quiet" onClick={() => void undo()} disabled={busy || !review.selected.label}>
               <RotateCcw size={16} />清除標記
@@ -825,7 +1018,7 @@ function LabelPage({
           </div>
         </details>
         <div className="keyboard-hint"><Keyboard size={14} />可使用 W、L、I 標記；方向鍵切換訊號</div>
-        {message && <p className="inline-error">{message}</p>}
+        {message && <p className="inline-error" role="alert">{message}</p>}
       </section>
     </div>
   );
@@ -847,10 +1040,13 @@ function ImportPage({
   const [interval, setInterval] = useState("15m");
   const [marketType, setMarketType] = useState("futures");
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [message, setMessage] = useState("");
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setMessage("");
     try {
@@ -867,6 +1063,7 @@ function ImportPage({
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "匯入失敗。");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -885,29 +1082,64 @@ function ImportPage({
         />
       )}
       <form className="import-workbench workspace-edge" onSubmit={submit}>
-        <section className="form-column">
-          <h2>策略資料</h2>
-          <label>策略名稱<input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 wickless_candle" required /></label>
+        <section className="form-column" aria-labelledby="strategy-data-title">
+          <h2 id="strategy-data-title">策略資料</h2>
+          <label>
+            策略名稱
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="例如 wickless_candle"
+              autoComplete="off"
+              required
+            />
+          </label>
           <label>
             使用市場
             <select value={datasetId} onChange={(e) => setDatasetId(e.target.value === "new" ? "new" : Number(e.target.value))}>
               <option value="new">建立新的 Binance 完整行情</option>
-              {datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.symbol} · {dataset.interval} · {dataset.market_type}</option>)}
+              {datasets.map((dataset) => (
+                <option value={dataset.id} key={dataset.id}>
+                  {dataset.symbol} · {dataset.interval} ·{" "}
+                  {dataset.market_type === "futures" ? "U 本位永續" : "現貨"}
+                </option>
+              ))}
             </select>
           </label>
           {datasetId === "new" && (
             <div className="market-grid">
-              <label>交易對<input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} /></label>
+              <label>
+                交易對
+                <input
+                  value={symbol}
+                  onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                />
+              </label>
               <label>週期<select value={interval} onChange={(e) => setInterval(e.target.value)}>{["1m","3m","5m","15m","30m","1h","2h","4h","1d"].map((item) => <option key={item}>{item}</option>)}</select></label>
               <label>市場<select value={marketType} onChange={(e) => setMarketType(e.target.value)}><option value="futures">U 本位永續</option><option value="spot">現貨</option></select></label>
             </div>
           )}
           <div className="import-note"><ArrowDownToLine size={18} /><span><strong>新市場會同步完整歷史 K 線</strong><small>第一次建立可能需要較長時間；已有行情會直接重用。</small></span></div>
         </section>
-        <section className="code-column">
-          <div className="section-heading"><h2>Pine 原始碼</h2><span>{pine.length.toLocaleString()} 字</span></div>
-          <textarea value={pine} onChange={(e) => setPine(e.target.value)} placeholder={"//@version=6\nindicator(\"我的指標\", overlay=true)\n\n// 貼上完整 Pine 原始碼"} required spellCheck={false} />
-          {message && <p className="inline-error">{message}</p>}
+        <section className="code-column" aria-labelledby="pine-source-label">
+          <div className="section-heading">
+            <label className="code-heading-label" id="pine-source-label" htmlFor="pine-source">
+              Pine 原始碼
+            </label>
+            <span>{pine.length.toLocaleString()} 字</span>
+          </div>
+          <textarea
+            id="pine-source"
+            value={pine}
+            onChange={(e) => setPine(e.target.value)}
+            placeholder={"//@version=6\nindicator(\"我的指標\", overlay=true)\n\n// 貼上完整 Pine 原始碼"}
+            required
+            spellCheck={false}
+            aria-describedby={message ? "import-error" : undefined}
+          />
+          {message && <p className="inline-error" id="import-error" role="alert">{message}</p>}
           <button className="button primary import-submit" disabled={busy || !name.trim() || !pine.trim()}>
             {busy ? <LoaderCircle className="spin" size={18} /> : <Import size={18} />}
             {busy ? "正在執行 PineTS…" : "匯入並建立 V1"}
@@ -932,17 +1164,32 @@ function AnalysisPage({
   );
   const [busy, setBusy] = useState(() => analysis === null);
   const [improving, setImproving] = useState(false);
+  const improvingRef = useRef(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    let active = true;
     if (!api.peekAnalysis(dataset.id, strategy.name)) setBusy(true);
     api.analysis(dataset.id, strategy.name)
-      .then(setAnalysis)
-      .catch((reason) => setMessage(reason.message))
-      .finally(() => setBusy(false));
+      .then((result) => {
+        if (active) setAnalysis(result);
+      })
+      .catch((reason) => {
+        if (active) {
+          setMessage(reason instanceof Error ? reason.message : "分析資料載入失敗。");
+        }
+      })
+      .finally(() => {
+        if (active) setBusy(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [dataset.id, strategy.name]);
 
   const improve = async () => {
+    if (improvingRef.current) return;
+    improvingRef.current = true;
     setImproving(true);
     setMessage("");
     try {
@@ -951,19 +1198,39 @@ function AnalysisPage({
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "目前無法產生新版。");
     } finally {
+      improvingRef.current = false;
       setImproving(false);
     }
   };
 
   if (busy) return <LoadingState variant="analysis" />;
-  if (!analysis) return <EmptyState title="無法分析這個版本" description={message} action={() => location.reload()} />;
+  if (!analysis) {
+    return (
+      <EmptyState
+        title="無法分析這個版本"
+        description={message}
+        action={() => window.location.reload()}
+      />
+    );
+  }
   return (
     <div className="page analysis-page">
       <PageHeader
         step="步驟 3／4 · AI 改善"
         title={`分析 ${strategy.name}`}
         description="比較盈利與虧損特徵；做多、做空分開搜尋，沒有改善的方向沿用上一版。"
-        actions={<button className="button primary" onClick={() => void improve()} disabled={improving || analysis.decisive < 1}>{improving ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}{improving ? "正在搜尋規則…" : "產生改善版本"}</button>}
+        actions={(
+          <button
+            className="button primary"
+            onClick={() => void improve()}
+            disabled={improving || analysis.decisive < 1}
+          >
+            {improving
+              ? <LoaderCircle className="spin" size={17} aria-hidden="true" />
+              : <Sparkles size={17} aria-hidden="true" />}
+            {improving ? "正在搜尋規則…" : "產生改善版本"}
+          </button>
+        )}
       />
       {improving && (
         <OperationBuffer
@@ -984,7 +1251,7 @@ function AnalysisPage({
           ["short", "做空", TrendingDown, analysis.directions.short],
         ] as const).map(([key, label, Icon, stat]) => (
           <article className={`direction-summary ${key}`} key={key}>
-            <div className="direction-icon"><Icon size={19} /></div>
+            <div className="direction-icon"><Icon size={19} aria-hidden="true" /></div>
             <div>
               <span>{label}證據</span>
               <strong>{formatRate(stat.win_rate)}</strong>
@@ -997,13 +1264,39 @@ function AnalysisPage({
           </article>
         ))}
       </section>
-      {message && <p className="inline-error">{message}</p>}
+      {message && <p className="inline-error" role="alert">{message}</p>}
       <div className="evidence-layout workspace-edge">
         <section className="evidence-table">
           <div className="section-heading"><div><span className="eyebrow">人工證據</span><h2>盈利與虧損的特徵差異</h2></div><span>{analysis.feature_comparison.length} 個可比較特徵</span></div>
           {analysis.feature_comparison.length ? (
-            <table><thead><tr><th>特徵</th><th>盈利中位數</th><th>虧損中位數</th><th>差異強度</th></tr></thead>
-            <tbody>{analysis.feature_comparison.map((row) => <tr key={row.feature}><td><strong>{row.name}</strong><small>{row.feature}</small></td><td>{row.win_median.toFixed(6)}</td><td>{row.loss_median.toFixed(6)}</td><td><span className="strength"><i style={{ width: `${Math.min(100, row.importance * 35)}%` }} /></span></td></tr>)}</tbody></table>
+            <div className="table-scroll" tabIndex={0}>
+              <table>
+                <caption className="sr-only">人工標記中盈利與虧損的技術特徵比較</caption>
+                <thead><tr><th scope="col">特徵</th><th scope="col">盈利中位數</th><th scope="col">虧損中位數</th><th scope="col">差異強度</th></tr></thead>
+                <tbody>{analysis.feature_comparison.map((row) => {
+                  const strength = Math.min(100, row.importance * 35);
+                  return (
+                    <tr key={row.feature}>
+                      <td><strong>{row.name}</strong><small>{row.feature}</small></td>
+                      <td>{row.win_median.toFixed(6)}</td>
+                      <td>{row.loss_median.toFixed(6)}</td>
+                      <td>
+                        <span
+                          className="strength"
+                          role="meter"
+                          aria-label={`${row.name}差異強度`}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={Math.round(strength)}
+                        >
+                          <i style={{ width: `${strength}%` }} />
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
           ) : <div className="table-empty">只要有一筆人工結果就可以執行改善；同時有盈利與虧損時，特徵比較會更完整。</div>}
         </section>
         <aside className="evidence-inspector">
@@ -1023,12 +1316,12 @@ function Metric({ label, value, note }: { label: string; value: string; note: st
 function VersionsPage({
   dataset,
   strategy,
-  onSelect,
+  onUse,
   onDeleted,
 }: {
   dataset: Dataset;
   strategy: StrategySummary;
-  onSelect: (name: string) => void;
+  onUse: (name: string) => void;
   onDeleted: () => void | Promise<void>;
 }) {
   const [versions, setVersions] = useState<StrategySummary[]>(
@@ -1037,7 +1330,10 @@ function VersionsPage({
   const [selected, setSelected] = useState(strategy.name);
   const [busy, setBusy] = useState(() => versions.length === 0);
   const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
   const [message, setMessage] = useState("");
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   const current = versions.find((item) => item.name === selected) ?? versions.at(-1);
 
   const load = useCallback(async () => {
@@ -1045,14 +1341,18 @@ function VersionsPage({
     try {
       const result = await api.versions(dataset.id, strategy.root);
       setVersions(result.versions);
-      if (!result.versions.some((item) => item.name === selected)) setSelected(result.versions.at(-1)?.name ?? "");
+      if (!result.versions.some((item) => item.name === selectedRef.current)) {
+        setSelected(result.versions.at(-1)?.name ?? "");
+      }
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "版本載入失敗。");
     } finally {
       setBusy(false);
     }
-  }, [dataset.id, strategy.root, selected]);
-  useEffect(() => { void load(); }, [dataset.id, strategy.root]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dataset.id, strategy.root]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const copyPine = async () => {
     if (!current) return;
@@ -1064,8 +1364,9 @@ function VersionsPage({
     }
   };
   const remove = async () => {
-    if (!current || current.version === 1) return;
+    if (!current || current.version === 1 || deletingRef.current) return;
     if (!confirm(`確定刪除 ${current.name} 與所有後續版本？`)) return;
+    deletingRef.current = true;
     setDeleting(true);
     try {
       await api.removeVersion(dataset.id, current.name);
@@ -1074,8 +1375,27 @@ function VersionsPage({
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "刪除失敗。");
     } finally {
+      deletingRef.current = false;
       setDeleting(false);
     }
+  };
+  const selectVersionFromKeyboard = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % versions.length;
+    else if (event.key === "ArrowLeft") {
+      nextIndex = (index - 1 + versions.length) % versions.length;
+    } else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = versions.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const next = versions[nextIndex];
+    setSelected(next.name);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`version-tab-${next.version}`)?.focus();
+    });
   };
 
   if (busy && !versions.length) return <LoadingState variant="versions" />;
@@ -1093,7 +1413,27 @@ function VersionsPage({
         step="步驟 4／4 · 策略版本"
         title="比較與管理版本"
         description="每一版保留自己的 Pine 與人工結果；依版本順序查看，不覆蓋上一版。"
-        actions={<><button className="button quiet" onClick={() => void copyPine()} disabled={deleting}><Clipboard size={17} />複製到 TradingView</button>{current.version > 1 && <button className="button danger-quiet" onClick={() => void remove()} disabled={deleting}><Trash2 size={17} />刪除這版</button>}</>}
+        actions={(
+          <>
+            <button
+              className="button quiet"
+              onClick={() => void copyPine()}
+              disabled={deleting || current.pine_available === false}
+              title={current.pine_available === false ? "這個版本沒有可複製的 Pine 原始碼" : undefined}
+            >
+              <Clipboard size={17} aria-hidden="true" />複製到 TradingView
+            </button>
+            {current.version > 1 && (
+              <button
+                className="button danger-quiet"
+                onClick={() => void remove()}
+                disabled={deleting}
+              >
+                <Trash2 size={17} aria-hidden="true" />刪除這版
+              </button>
+            )}
+          </>
+        )}
       />
       {deleting && (
         <OperationBuffer
@@ -1101,28 +1441,92 @@ function VersionsPage({
           detail="完成前保留目前內容，避免畫面突然變空。"
         />
       )}
-      <div className="version-tabs workspace-edge" role="tablist">
-        {versions.map((version) => <button key={version.name} role="tab" aria-selected={version.name === current.name} className={version.name === current.name ? "active" : ""} onClick={() => setSelected(version.name)}><strong>V{version.version}</strong><span>{formatRate(version.win_rate)}</span><small>{version.labeled.toLocaleString()} 筆標記</small></button>)}
-      </div>
-      {message && <p className={message.includes("已複製") ? "inline-success" : "inline-error"}>{message}</p>}
-      <section className="version-hero workspace-edge">
-        <div><span className="eyebrow">V{current.version} · {current.version === 1 ? "原始策略" : "AI 改善版本"}</span><h1>{current.name}</h1><p>{metadata?.rule_text ?? "你的原始多空條件，沒有套用 AI 過濾。"}</p></div>
-        <div className="hero-rate"><span>綜合實際</span><strong>{formatRate(current.win_rate)}</strong><small>{current.wins} 勝／{current.losses} 輸</small></div>
-      </section>
-      <section className="version-summary-band workspace-edge" aria-label="版本標記摘要">
-        <div className="version-stat primary-stat"><Database size={18} /><span><small>總共已標記</small><strong>{current.labeled.toLocaleString()} 筆</strong></span></div>
-        <div className="version-stat"><Check size={18} /><span><small>盈利</small><strong>{current.wins.toLocaleString()}</strong></span></div>
-        <div className="version-stat"><X size={18} /><span><small>虧損</small><strong>{current.losses.toLocaleString()}</strong></span></div>
-        <div className="version-stat"><Activity size={18} /><span><small>無效</small><strong>{current.invalid.toLocaleString()}</strong></span></div>
-      </section>
-      <div className="direction-grid workspace-edge">
-        {(["long", "short"] as const).map((direction) => {
-          const count = direction === "long" ? current.long : current.short;
-          const rules = metadata?.direction_results?.[direction]?.rules ?? [];
-          return <section className="direction-panel" key={direction}><div className="section-heading"><div><span className="eyebrow">{direction === "long" ? "↑ 做多" : "↓ 做空"}</span><h2>{rules.length ? "本版 AI 改善" : current.version === 1 ? "原始訊號" : "完整沿用上一版"}</h2></div><strong>{count} 筆訊號</strong></div><div className="rule-copy">{metadata?.direction_results?.[direction]?.rule_text ?? "沒有新增過濾條件。"}</div></section>;
+      <div className="version-tabs workspace-edge" role="tablist" aria-label="策略版本">
+        {versions.map((version, index) => {
+          const active = version.name === current.name;
+          return (
+            <button
+              id={`version-tab-${version.version}`}
+              key={version.name}
+              role="tab"
+              aria-selected={active}
+              aria-controls="version-detail"
+              tabIndex={active ? 0 : -1}
+              className={active ? "active" : ""}
+              onClick={() => setSelected(version.name)}
+              onKeyDown={(event) => selectVersionFromKeyboard(event, index)}
+            >
+              <strong>V{version.version}</strong>
+              <span>{formatRate(version.win_rate)}</span>
+              <small>{version.labeled.toLocaleString()} 筆標記</small>
+            </button>
+          );
         })}
       </div>
-      <button className="button primary use-version" onClick={() => onSelect(current.name)}><BarChart3 size={18} />使用 V{current.version} 前往標記</button>
+      {message && (
+        <p
+          className={message.includes("已複製") ? "inline-success" : "inline-error"}
+          role={message.includes("已複製") ? "status" : "alert"}
+        >
+          {message}
+        </p>
+      )}
+      <div
+        id="version-detail"
+        role="tabpanel"
+        aria-labelledby={`version-tab-${current.version}`}
+        tabIndex={0}
+      >
+        <section className="version-hero workspace-edge">
+          <div>
+            <span className="eyebrow">
+              V{current.version} · {current.version === 1 ? "原始策略" : "AI 改善版本"}
+            </span>
+            <h1>{current.name}</h1>
+            <p>{metadata?.rule_text ?? "你的原始多空條件，沒有套用 AI 過濾。"}</p>
+          </div>
+          <div className="hero-rate">
+            <span>綜合實際</span>
+            <strong>{formatRate(current.win_rate)}</strong>
+            <small>{current.wins} 勝／{current.losses} 輸</small>
+          </div>
+        </section>
+        <section className="version-summary-band workspace-edge" aria-label="版本標記摘要">
+          <div className="version-stat primary-stat"><Database size={18} aria-hidden="true" /><span><small>總共已標記</small><strong>{current.labeled.toLocaleString()} 筆</strong></span></div>
+          <div className="version-stat"><Check size={18} aria-hidden="true" /><span><small>盈利</small><strong>{current.wins.toLocaleString()}</strong></span></div>
+          <div className="version-stat"><X size={18} aria-hidden="true" /><span><small>虧損</small><strong>{current.losses.toLocaleString()}</strong></span></div>
+          <div className="version-stat"><Activity size={18} aria-hidden="true" /><span><small>無效</small><strong>{current.invalid.toLocaleString()}</strong></span></div>
+        </section>
+        <div className="direction-grid workspace-edge">
+          {(["long", "short"] as const).map((direction) => {
+            const count = direction === "long" ? current.long : current.short;
+            const rules = metadata?.direction_results?.[direction]?.rules ?? [];
+            return (
+              <section className="direction-panel" key={direction}>
+                <div className="section-heading">
+                  <div>
+                    <span className="eyebrow">{direction === "long" ? "↑ 做多" : "↓ 做空"}</span>
+                    <h2>
+                      {rules.length
+                        ? "本版 AI 改善"
+                        : current.version === 1
+                          ? "原始訊號"
+                          : "完整沿用上一版"}
+                    </h2>
+                  </div>
+                  <strong>{count} 筆訊號</strong>
+                </div>
+                <div className="rule-copy">
+                  {metadata?.direction_results?.[direction]?.rule_text ?? "沒有新增過濾條件。"}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+      <button className="button primary use-version" onClick={() => onUse(current.name)}>
+        <BarChart3 size={18} aria-hidden="true" />使用 V{current.version} 前往標記
+      </button>
     </div>
   );
 }

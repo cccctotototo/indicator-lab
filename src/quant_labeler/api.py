@@ -31,6 +31,7 @@ from .storage import (
     get_signal,
     initialize_database,
     list_datasets,
+    list_review_signals,
     list_signals,
 )
 from .strategy_import import import_strategy_v1
@@ -146,6 +147,13 @@ def _signal_record(row: pd.Series | dict) -> dict:
     )
 
 
+def _signal_reference(row: Any) -> dict:
+    return {
+        "id": int(row.id),
+        "label": None if pd.isna(row.label) else str(row.label),
+    }
+
+
 def _strategy_rows(dataset_id: int) -> list[dict]:
     signals = list_signals(dataset_id)
     if signals.empty:
@@ -213,7 +221,7 @@ def review(
 ) -> dict:
     try:
         dataset, frame = _market_frame(dataset_id)
-        signals = list_signals(dataset_id, indicator)
+        signals = list_review_signals(dataset_id, indicator)
         if signals.empty:
             raise ValueError("這個版本目前沒有訊號。")
         ordered = signals.sort_values(["timestamp", "id"], ascending=[False, False]).reset_index(drop=True)
@@ -250,7 +258,7 @@ def review(
                     "selected_position": selected_position,
                 },
                 "selected": _signal_record(selected_row),
-                "signals": [_signal_record(row) for _, row in ordered.iterrows()],
+                "signals": [_signal_reference(row) for row in ordered.itertuples(index=False)],
                 "visible_signals": [_signal_record(row) for _, row in visible.iterrows()],
                 "candles": candles.to_dict(orient="records"),
             }

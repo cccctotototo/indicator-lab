@@ -57,7 +57,7 @@ def test_review_returns_chart_window_and_newest_unlabeled(monkeypatch):
             frame,
         ),
     )
-    monkeypatch.setattr(api, "list_signals", lambda dataset_id, indicator: signals)
+    monkeypatch.setattr(api, "list_review_signals", lambda dataset_id, indicator: signals)
 
     result = api.review(1, "demo", None, 20, 10)
 
@@ -65,6 +65,7 @@ def test_review_returns_chart_window_and_newest_unlabeled(monkeypatch):
     assert result["summary"]["total"] == 2
     assert result["summary"]["labeled"] == 1
     assert len(result["candles"]) == 31
+    assert result["signals"] == [{"id": 2, "label": None}, {"id": 1, "label": "win"}]
 
 
 def test_label_endpoint_reuses_cached_market_frame(monkeypatch):
